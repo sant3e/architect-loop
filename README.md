@@ -48,25 +48,14 @@ that feeds the build loop's PRD.
 
 ## How it works in one picture
 
-```
- CLAUDE FABLE (architect, minutes)          GPT-5.5 CODEX BUILDERS (hours)
- ─────────────────────────────────          ─────────────────────────────────
- 1 rule on builder disagreements     ──►    worktree 1 ── lane agent (xhigh)
- 2 run the gates ITSELF; judge raw   ──►    worktree 2 ── lane agent (xhigh)
-   evidence vs frozen gates          ──►    worktree 3 ── lane agent (xhigh)
- 3 split the slice into 1-4 lanes
-   with disjoint file sets                  each lane, in parallel:
- 4 freeze gates → commit → dispatch         argue with the spec FIRST →
- 5 per-lane checks (tamper, bounds)         build ONLY its own files →
-   → commit, merge, smoke-run gates  ◄──    raw lane report, no commits
- 6 verdict next session → main
+![/architect — the loop](docs/announcement/img/loop-diagram.png)
 
-            └────── docs/HANDOFF.md + docs/gates/ + docs/lanes/ + git ──────┘
-                  the repo remembers everything; not in it = didn't happen
-
- (optional first step — /architect-research: 6 parallel Codex web-researchers,
-  Fable verifies the claims and writes the cited report that feeds the PRD)
-```
+One architect session per work block: **rule on disagreements → judge the last
+run's raw evidence against frozen gates → split the next slice into 1–4 lanes
+with disjoint file sets → freeze gates, commit, dispatch → per-lane tamper +
+boundary checks → commit, merge, smoke-run gates → verdict next session →
+main.** (Optional first step when you're still deciding what to build:
+`/architect-research` feeds the PRD.)
 
 **Who does what:**
 
@@ -108,35 +97,15 @@ mechanically:
 The economics: judgment minutes on the expensive model, typing hours on the
 flat-rate one. Both halves run on subscriptions you already have.
 
-## The research skill, a layer deeper
+## The optional research skill
 
-`/architect-research` isn't "search the web and summarize." It encodes the
-methodology the best deep-research systems converged on:
-
-- **Brief first** — your question is compressed into a research brief that
-  every later step is audited against.
-- **Six lanes, fanned out in parallel** (each a fresh
-  `codex exec -c web_search="live"`, read-only sandbox):
-  1. **Academic** — arXiv recency queries + Semantic Scholar citation
-     snowballing, survey-first
-  2. **Popular repos** — dependents counts as adoption evidence (stars are
-     gameable; ~4.5M fake stars documented)
-  3. **Cutting-edge repos** — star-velocity + the emerging-vs-hype gate
-  4. **Production patterns** — how the 2-3 best libraries in the niche design
-     APIs, errors, extension points, tests — then a cross-library diff
-  5. **General web** — postmortems, comparisons, official docs
-  6. **Expert opinion** *(second wave)* — blogs/talks/X of the field's named
-     experts, roster-seeded from what lanes 1-5 surface
-- **Verification with teeth** — ≥2 independent sources per load-bearing claim,
-  VERIFIED/UNVERIFIED/DISPUTED/SUSPICIOUS tags, adversarial falsification
-  searches, citations only from URLs actually fetched (agents fabricate 3-13%
-  of URLs otherwise).
-- **One author** — Fable writes the report in a single pass: answer first,
-  confidence per claim, "what would change this conclusion", open questions.
-  Expert *opinions* are positions, never facts; expert *disagreements* are
-  flagged as the genuinely open questions.
-
-The report feeds `/architect`'s PRD when you're ready to build.
+`/architect-research` is the discovery-scale companion for when you're still
+deciding *what* to build: six parallel Codex web-researcher lanes (academic,
+popular repos, cutting-edge repos, production patterns, general web, expert
+opinion), ≥2 independent sources per load-bearing claim, citations only from
+URLs actually fetched. Fable verifies and writes one cited, decision-oriented
+report to `docs/research/` that feeds `/architect`'s PRD. Methodology details:
+[skills/architect-research/SKILL.md](skills/architect-research/SKILL.md).
 
 ## What's in the box
 
