@@ -163,16 +163,24 @@ questions), never to stretch one builder context across slices. "Code is cheap":
 when a long run leaves the repo broken, `git reset` and re-dispatch beats rescue
 prompting.
 
-### R8. Parallel lanes only on disjoint file sets, capped at 3–4
+### R8. Parallelism is architect-orchestrated: one worktree + one fresh `codex exec` per lane, capped at 4
 Merge conflicts between parallel agents are the top reported multi-agent failure;
 the converged mitigation is mapping file-touch sets before parallelizing, one
-worktree per lane, and a practical ceiling of 2–4 lanes before coordination
+git worktree per agent, and a practical ceiling of 2–4 lanes before coordination
 overhead dominates ([Intility engineering](https://engineering.intility.com/article/agent-teams-or-how-i-learned-to-stop-worrying-about-merge-conflicts-and-love-git-worktrees),
 [MindStudio worktrees](https://www.mindstudio.ai/blog/git-worktrees-parallel-ai-coding-agents)).
-The builder block instructs max 3–4 lane agents on modules that don't import
-each other, plus one reviewer lane. Codex's own multi-agent support
-(`[features] multi_agent = true`, `~/.codex/agents/*.toml`) handles the
-spawning; the spec defines the lane boundaries.
+**The architect — not Codex — owns the fan-out.** The spec splits the slice
+into 1–4 lanes with provably disjoint file sets; each lane is an isolated
+worktree running its own `codex exec` process, writing its own lane report
+(`docs/lanes/`); the architect runs per-lane boundary checks (`git status`
+must show only declared files), commits each passing lane, and merges
+sequentially with gate smoke-runs after every merge. This replaced an earlier
+design that delegated lane-spawning to Codex's internal multi-agent feature —
+which is opt-in (`[features] multi_agent`, off by default) and silently
+degrades to serial work when unset, with zero architect visibility either
+way. Architect-owned worktrees make a merge conflict a detectable spec defect
+instead of a silent hazard, and isolate per-lane failure (discard one lane,
+not the slice).
 
 ### R9. Supervise asynchronously; never block on the builder
 Fable 5 is specifically tuned for this: "significantly more dependable at
@@ -276,12 +284,13 @@ architect notes this trade-off but defaults to the subscription.
 │   3. Spec next slice: objective + output format + tool guidance +          │
 │      boundaries + out-of-scope; freeze gates to docs/gates/<slice>.md;     │
 │      commit the freeze                                                     │
-│   4. Dispatch: codex exec (background, fresh context, xhigh default)       │
-│      PHASE 0 disagree-or-fail → PHASE 1 freeze contracts →                 │
-│      PHASE 2 ≤3-4 disjoint lanes + 1 reviewer lane → commit/push →         │
-│      update HANDOFF.md with raw results only                               │
-│   5. Post-flight: HANDOFF updated? disagreements raised? git diff on       │
-│      docs/gates/ clean? → report; judgment waits for next block            │
+│   4. Dispatch: 1-4 parallel codex exec lanes, one git worktree each        │
+│      (background, fresh context, xhigh default). Per lane: PHASE 0         │
+│      disagree-or-fail → PHASE 1 contracts frozen → PHASE 2 build own       │
+│      files only → raw lane report (docs/lanes/), no commits                │
+│   5. Post-flight per lane: raw-only? disagreements raised? gates           │
+│      untouched? in-bounds? → architect commits + merges lanes with         │
+│      gate smoke-runs; verdict waits for next block                         │
 │                                                                            │
 └────────────────────────────────────────────────────────────────────────────┘
          repo carries everything across the gap between blocks

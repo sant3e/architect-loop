@@ -19,12 +19,55 @@ never as a shell argument. Big prompt blocks contain quotes that shells
 (especially Windows PowerShell) mangle; a mangled argument makes codex fall
 back to waiting on stdin and hang forever in a background shell.
 
+Single-lane slice (dispatch in the main checkout):
+
 ```bash
 codex exec -C <repo-root> --sandbox workspace-write \
   -m gpt-5.5 -c model_reasoning_effort="xhigh" \
   --json -o .architect/last-run.md \
   - < .architect/dispatch-block.md
 ```
+
+## Worktree fan-out (2–4 lanes — the architect owns the parallelism)
+
+One isolated worktree + one fresh `codex exec` per lane, all launched in
+parallel in the background. Lanes have provably disjoint file-touch sets from
+the spec; each writes raw results to its own `docs/lanes/<slice>-<lane>.md`,
+so nothing collides.
+
+```bash
+# per lane, off the freeze commit
+git -C <repo-root> worktree add .architect/wt/<slice>-<NN> \
+  -b lane/<slice>-<NN> <freeze-sha>
+
+# write the lane's builder block, then dispatch (background, all lanes parallel)
+codex exec -C <repo-root>/.architect/wt/<slice>-<NN> --sandbox workspace-write \
+  -m gpt-5.5 -c model_reasoning_effort="xhigh" \
+  --json -o .architect/wt/<slice>-<NN>.last-run.md \
+  - < .architect/wt/<slice>-<NN>.block.md
+```
+
+A worktree's `.git` is a pointer file and the resolved git dir is
+sandbox-protected too — builders cannot commit or touch shared history from
+any lane. That's a feature: nothing reaches a branch until the architect's
+checks pass.
+
+### Integration (architect-only, after per-lane post-flight passes)
+
+```bash
+git -C <repo-root> checkout -b slice/<name> <freeze-sha>
+# per passing lane, sequentially:
+git -C <repo-root>/.architect/wt/<slice>-<NN> add -A
+git -C <repo-root>/.architect/wt/<slice>-<NN> commit -m "lane <NN>: <what>"
+git -C <repo-root> merge --no-ff lane/<slice>-<NN>
+<run the gate commands>          # integration smoke after every merge
+# cleanup:
+git -C <repo-root> worktree remove .architect/wt/<slice>-<NN>
+git -C <repo-root> branch -d lane/<slice>-<NN>
+```
+
+A merge conflict = the lane plan wasn't disjoint = a spec defect. Kill the
+conflicting lane and re-spec; don't hand-resolve builder conflicts.
 
 - Run in the background (multi-hour runs are normal); read
   `.architect/last-run.md` and the repo state afterwards.
@@ -40,12 +83,12 @@ codex exec -C <repo-root> --sandbox workspace-write \
 - Cross-model review gate: `codex review --base <branch>` (or `--uncommitted`),
   with custom focus text appended.
 - Add `.architect/` to the repo's `.gitignore`.
-- **Builder commits may fail by design**: workspace-write protects `.git` as
-  read-only on some platforms (observed on Windows, Codex 0.139 — no config
-  toggle exists; `writable_roots` does not bypass it). The builder reports the
-  exact error and leaves the tree intact; the architect commits after
-  post-flight passes. This is strictly safer: nothing reaches history until
-  after the gate tamper-check.
+- **Builders never commit — the architect does.** workspace-write protects
+  `.git` as read-only (verified on Windows, Codex 0.139 — no config toggle;
+  `writable_roots` does not bypass it; worktree pointer files are resolved and
+  protected too). This is load-bearing for the loop: lanes can't touch shared
+  history, so nothing reaches a branch until the architect's tamper, boundary,
+  and gate checks pass.
 
 ## Manual alternative (human-driven)
 
@@ -70,21 +113,20 @@ freeze they are read-only for everyone including you. The files under
 docs/gates/ are read-only at all times — editing them fails the slice
 regardless of results.
 
-PHASE 2 — Spawn at most 3-4 lane agents, each on a disjoint file set (modules
-that don't import each other), plus ONE reviewer agent that never writes
-feature code: it checks every lane against the spec + tests + frozen docs and
-returns APPROVE or a numbered defect list. Nothing merges without APPROVE.
+PHASE 2 — Build YOUR LANE ONLY: exactly the files listed in BOUNDARIES. You
+are one of several parallel lane agents working in isolated worktrees; files
+outside your lane belong to other agents — touching them fails your lane.
 No placeholder implementations — search the codebase before implementing;
-full implementations only. Commit per lane with descriptive messages; push;
-then update docs/HANDOFF.md with RAW results only — tables, numbers, commit
-SHAs, test output — no interpretation, no "promising". If git commit fails
-because the sandbox protects .git (workspace-write mounts .git read-only on
-some platforms), do NOT delete lock files or escalate privileges: leave the
-working tree intact, record the exact error in the handoff, and stop — the
-architect commits after post-flight. Every status claim must
-be backed by a command result from this run. Verdicts belong to the architect
-and the human. Persist until the slice is fully handled end-to-end; do not
-stop at analysis or partial fixes.
+full implementations only. Verify your work by running the lane's gate
+commands and record the verbatim output. Do NOT commit — the sandbox protects
+.git by design; the architect commits and merges after verification. Do NOT
+delete lock files or escalate privileges if a git command fails; record the
+exact error and continue. When done, write your lane report to
+docs/lanes/<slice>-<lane>.md with RAW results only — tables, numbers, command
+output — no interpretation, no "promising". Every status claim must be backed
+by a command result from this run. Verdicts belong to the architect and the
+human. Persist until your lane is fully handled end-to-end; do not stop at
+analysis or partial fixes.
 
 === OBJECTIVE (and why) ===
 ...
@@ -107,10 +149,10 @@ stop at analysis or partial fixes.
 
 ## Builder-side standing setup (one time per machine/repo)
 
-- `~/.codex/config.toml`: `model = "gpt-5.5"`; optionally
-  `[features] multi_agent = true` and lane/reviewer agent definitions under
-  `~/.codex/agents/` or `.codex/agents/` (TOML: `name`, `description`,
-  `developer_instructions`, optional `model_reasoning_effort`, `sandbox_mode`).
+- `~/.codex/config.toml`: `model = "gpt-5.5"`. Parallelism is
+  architect-orchestrated worktrees — it does NOT depend on Codex's experimental
+  `[features] multi_agent` config. (A lane agent may still use Codex-internal
+  subagents for its own intra-lane work if that feature is enabled; optional.)
 - Repo `AGENTS.md`: exact build/test commands and repo gotchas only — the
   loop's PHASE rules stay in the dispatch block so they version with the skill.
 - Subscription quotas are per-5h window + weekly cap; long runs draw the weekly

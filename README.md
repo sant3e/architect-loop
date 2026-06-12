@@ -25,56 +25,57 @@ plan and the Codex CLI signed into a ChatGPT plan.
 In any repo, inside Claude Code:
 
 ```
-/architect-research <what you're thinking about building>
-```
-
-…when you're **brainstorming or picking a technology**. Fans out parallel
-Codex web-researchers across six lanes, verifies every claim against sources,
-and writes a cited, decision-oriented report to `docs/research/`.
-
-```
 /architect
 ```
 
-…when you're **building**. One short session per work block: Claude judges the
-last run's evidence, specs the next one-PR slice with frozen acceptance gates,
-and dispatches a fresh autonomous Codex run that works for hours. Repeat.
+**The main event.** One short Fable session per work block: it judges the last
+run's evidence against frozen gates, splits the next one-PR slice into 1–4
+lanes with disjoint file sets, and dispatches **one fresh `codex exec` builder
+per lane, each in its own git worktree, all in parallel** — then reviews,
+commits, and merges each lane when they finish. Builders run unattended for
+hours; Fable's judgment costs minutes.
+
+```
+/architect-research <what you're thinking about building>
+```
+
+…when you're **brainstorming or picking a technology** first. Fans out
+parallel Codex web-researchers across six lanes, verifies every claim against
+sources, and writes a cited, decision-oriented report to `docs/research/`
+that feeds the build loop's PRD.
 
 ---
 
 ## How it works in one picture
 
 ```
-            ┌──────────── /architect-research (optional, first) ────────────┐
-            │  6 parallel Codex researchers:                                │
-            │  academic · popular repos · cutting-edge · production         │
-            │  patterns · general web · expert opinion                      │
-            │            → Fable verifies claims, writes the report         │
-            └──────────────────────────┬────────────────────────────────────┘
-                                       ▼
- CLAUDE FABLE (architect, minutes)            GPT-5.5 CODEX (builder, hours)
- ──────────────────────────────────           ─────────────────────────────────
- 1 rule on builder disagreements       ──►    PHASE 0  plan + MANDATORY
- 2 run the gates ITSELF, judge raw                      disagreements
-   evidence vs frozen gates            ◄──    PHASE 1  freeze contracts
- 3 spec next one-PR slice                     PHASE 2  ≤4 disjoint lanes +
- 4 freeze gates → commit → dispatch                     1 reviewer lane →
- 5 post-flight tamper check                             commit, push, update
-                                                        HANDOFF with raw
-                                                        results only
-            └─────── docs/HANDOFF.md + docs/gates/ + git ───────┘
-                       the repo carries everything;
-                  not in the handoff = didn't happen
+ CLAUDE FABLE (architect, minutes)          GPT-5.5 CODEX BUILDERS (hours)
+ ─────────────────────────────────          ─────────────────────────────────
+ 1 rule on builder disagreements     ──►    worktree 1 ── lane agent (xhigh)
+ 2 run the gates ITSELF; judge raw   ──►    worktree 2 ── lane agent (xhigh)
+   evidence vs frozen gates          ──►    worktree 3 ── lane agent (xhigh)
+ 3 split the slice into 1-4 lanes
+   with disjoint file sets                  each lane, in parallel:
+ 4 freeze gates → commit → dispatch         argue with the spec FIRST →
+ 5 per-lane checks (tamper, bounds)         build ONLY its own files →
+   → commit, merge, smoke-run gates  ◄──    raw lane report, no commits
+ 6 verdict next session → main
+
+            └────── docs/HANDOFF.md + docs/gates/ + docs/lanes/ + git ──────┘
+                  the repo remembers everything; not in it = didn't happen
+
+ (optional first step — /architect-research: 6 parallel Codex web-researchers,
+  Fable verifies the claims and writes the cited report that feeds the PRD)
 ```
 
 **Who does what:**
 
 | | Model | Effort | Job |
 |---|---|---|---|
-| Architect | Claude Fable | `high` (pinned by the skill) | judgment only: arbitration, judging evidence, specs, kill/continue |
-| Builder | GPT-5.5 via `codex exec` | `xhigh` (architect may dial per slice) | implementation, hours at a time, unattended |
+| Architect | Claude Fable | `high` (pinned by the skill) | judgment only: arbitration, judging evidence, lane-splitting, review + merge, kill/continue |
+| Builders | 1–4 parallel GPT-5.5 `codex exec` agents, one git worktree each | `xhigh` (architect may dial per lane) | implementation, hours at a time, unattended, own files only |
 | Researchers | GPT-5.5 via `codex exec -c web_search="live"` | `high` | gathering only — never recommendations |
-| Memory | the repo | — | `docs/HANDOFF.md`, `docs/gates/`, `docs/research/`, git history |
+| Memory | the repo | — | `docs/HANDOFF.md`, `docs/gates/`, `docs/lanes/`, `docs/research/`, git history |
 | You | human | — | read the handoff between blocks; kill/continue authority |
 
 ## Why this shape works
@@ -97,9 +98,12 @@ mechanically:
 4. **Disagreement is mandatory.** The builder must challenge the spec (citing
    real files) before writing code — silent compliance is a defect. The
    architect rules on every disagreement: ACCEPT / REJECT / MODIFY + why.
-5. **Fresh context per slice.** Every slice is a new Codex process; the
-   architect's window holds judgment only. If a run breaks the repo:
-   `git reset`, re-dispatch. Code is cheap; rescue prompting isn't.
+5. **Fresh context per lane, worktree isolation between lanes.** Every lane
+   is a new Codex process in its own git worktree — no context rot, no file
+   collisions, and builders physically can't commit (the sandbox protects
+   `.git`), so nothing reaches a branch until the architect's checks pass.
+   If a lane breaks: discard the worktree, re-dispatch. Code is cheap;
+   rescue prompting isn't.
 
 The economics: judgment minutes on the expensive model, typing hours on the
 flat-rate one. Both halves run on subscriptions you already have.

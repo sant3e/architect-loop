@@ -70,12 +70,15 @@ cut spend 58–74% versus running the top model end-to-end.
 3. **Fable specs the next one-PR slice** and freezes its acceptance gates to
    `docs/gates/` — committed BEFORE any code exists.
 
-4. **A fresh Codex process builds for hours.** It must argue with the spec
-   before writing code, citing real files — silent compliance is a failure.
-   Up to 4 lane agents on disjoint files plus one reviewer lane. Then it
-   updates the handoff with raw numbers only. No adjectives. No "promising."
+4. **Up to 4 fresh Codex processes build for hours — in parallel, each in
+   its own git worktree, on its own disjoint file set.** Each must argue with
+   the spec before writing code, citing real files — silent compliance is a
+   failure. Each reports raw numbers only. No adjectives. No "promising."
 
-5. **Repeat.** You read the handoff between blocks. You own kill/continue.
+5. **Fable reviews each lane, commits it, and merges** — builders physically
+   can't commit (the sandbox protects .git), so nothing reaches a branch
+   until the architect's checks pass. You read the handoff between blocks.
+   You own kill/continue.
 
 The whole integration is one command:
 

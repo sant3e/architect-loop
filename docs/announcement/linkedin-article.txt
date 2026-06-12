@@ -39,7 +39,7 @@ I packaged the harness as two open-source skills for Claude Code. The architectu
 
 THE ARCHITECT - Claude Fable. Judgment only. It never writes implementation code. It arbitrates disagreements, judges evidence, writes specs, and makes kill/continue calls. Minutes of work per block.
 
-THE BUILDER - GPT-5.5 via the Codex CLI. A fresh process per task, running unattended for hours on a flat-rate ChatGPT plan. It currently leads Terminal-Bench 2.0 at 82.7% - hands-on building is the thing it's best at.
+THE BUILDERS - up to 4 parallel GPT-5.5 agents via the Codex CLI, each a fresh process in its own isolated git worktree, each owning a disjoint set of files, running unattended for hours on a flat-rate ChatGPT plan. GPT-5.5 currently leads Terminal-Bench 2.0 at 82.7% - hands-on building is the thing it's best at. The architect reviews, commits, and merges each lane; the builders physically cannot touch shared history.
 
 THE MEMORY - the repository itself. Both models are stateless between sessions. State lives in a handoff document, a frozen-gates folder, and git history. That's the key to why a few minutes of the expensive model is enough: it reads state instead of reconstructing it from a 200,000-token chat log.
 

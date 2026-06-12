@@ -2,9 +2,11 @@
 name: architect
 description: >
   Run the Architect Loop: Claude Fable (high effort) is the ARCHITECT — judgment
-  only: arbitration, judging raw evidence against frozen gates, next-slice specs,
-  kill/continue calls. GPT-5.5 via codex exec (xhigh) is the BUILDER. The repo is
-  the memory (docs/HANDOFF.md + docs/gates/). Use when asked to "architect",
+  only: arbitration, judging raw evidence against frozen gates, splitting slices
+  into disjoint lanes, kill/continue calls. The BUILDERS are 1-4 parallel
+  GPT-5.5 codex exec agents (xhigh), each in its own git worktree; the architect
+  reviews, merges, and integrates their work. The repo is the memory
+  (docs/HANDOFF.md + docs/gates/ + docs/lanes/). Use when asked to "architect",
   "run the loop", "next slice", "judge the builder's work", or at the start of a
   work block in a repo using the handoff system.
 effort: high
@@ -38,9 +40,10 @@ commands and the builder block template: `dispatch.md` next to this file.
    goalpost-moving bluntly too.
 6. **Audit every status claim** — yours and the builder's — against a tool
    result from the session before reporting it.
-7. **Fresh builder context per slice.** `codex exec resume --last` only for
-   follow-ups within the current slice. If a run leaves the repo broken,
-   prefer `git reset` + re-dispatch over rescue prompting.
+7. **Fresh builder context per lane, worktree isolation between lanes.**
+   `codex exec resume --last` only for follow-ups within the current lane. If
+   a run leaves a worktree broken, prefer discarding that lane + re-dispatch
+   over rescue prompting — lanes are cheap by construction.
 8. **Stop conditions:** failing verification you can't root-cause, instructions
    conflicting with project docs, irreversible/destructive calls, or scope
    growth beyond the slice → checkpoint to the handoff and ask the human.
@@ -117,28 +120,50 @@ One-PR-sized. The spec is the full delegation contract, self-contained:
 - **Boundaries** — files it may touch, files it must not, explicit
   out-of-scope list, "no placeholders; search before implementing",
   no refactors beyond the task.
+- **Lane plan** — split the slice into 1–4 parallel lanes with **provably
+  disjoint file-touch sets**: list every file each lane may touch; any overlap
+  means those lanes run as one. Each lane gets its own objective, output
+  format, and boundaries. Most slices are one lane — fan out only when the
+  work is genuinely parallel.
 - **Gates** — exact commands + thresholds, written to `docs/gates/<slice>.md`,
   committed now. This freeze commit is the last thing before dispatch.
-- **Effort call** — default `xhigh`; downgrade the slice to `high` when it is
+- **Effort call** — default `xhigh`; downgrade a lane to `high` when it is
   routine and tightly specified (record which and why in the spec).
 
-### 5. Dispatch
+### 5. Dispatch (one fresh `codex exec` per lane, worktree-isolated)
 
-Assemble the builder block from `dispatch.md` (PHASE 0/1/2 rules + this spec)
-and launch `codex exec` **in the background** per the canonical command there.
-Do not block on it — end the turn or do other judgment work; multi-hour runs
-are normal. Print the block too, so the human can paste it into an interactive
-`codex` session with `/goal` instead if they prefer to babysit the run.
+Per the mechanics in `dispatch.md`:
 
-### 6. Post-flight (when the run completes)
+- **1 lane** → dispatch in the main checkout.
+- **2–4 lanes** → `git worktree add` per lane off the freeze commit, write
+  each lane's builder block to a file, then launch one `codex exec` per
+  worktree — **all in parallel, all in the background**. Each lane builds only
+  its declared files and writes raw results to its own lane report
+  (`docs/lanes/<slice>-<lane>.md`), so lanes never collide.
 
-Verify exactly three things, with evidence: (a) `docs/HANDOFF.md` updated with
-raw results only, (b) PHASE 0 disagreements were raised (silent compliance =
-defect to log), (c) `git diff` on `docs/gates/` is clean. Report those three.
-If the builder's commit failed because the sandbox protects `.git` (expected
-on some platforms), commit the working tree yourself now — only after (a)–(c)
-pass, never before. **Do not judge the results now** — judgment belongs to the
-next architect session, after the human has seen the handoff.
+Do not block — end the turn or do other judgment work; multi-hour runs are
+normal. Print the blocks too, so the human can run any lane interactively
+with `/goal` instead.
+
+### 6. Post-flight and integrate (when the runs complete)
+
+**Per lane**, with evidence: (a) the lane report / handoff has raw results
+only, (b) PHASE 0 disagreements were raised (silent compliance = defect to
+log), (c) `git diff` on `docs/gates/` is clean in that worktree, (d)
+`git status` in the worktree shows **only files inside the lane's declared
+set** — an out-of-bounds write fails the lane.
+
+**Then integrate** (you do this — the sandbox protects `.git`, so builders
+never commit): commit each passing lane on its lane branch, merge lanes
+sequentially into the integration branch `slice/<name>`, running the gate
+commands after each merge as an integration smoke check. A merge conflict
+means the lane plan wasn't disjoint — that's a spec defect: kill the
+conflicting lane and re-spec it. Consolidate lane reports into
+`docs/HANDOFF.md`, remove the worktrees, commit.
+
+**Do not judge now** — the gate verdict on the integration branch belongs to
+the next architect session; merge to main only on a PASS/CONTINUE verdict
+there.
 
 ## Maintenance
 
