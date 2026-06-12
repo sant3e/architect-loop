@@ -143,7 +143,10 @@ Per the mechanics in `dispatch.md`:
 
 Do not block — end the turn or do other judgment work; multi-hour runs are
 normal. Print the blocks too, so the human can run any lane interactively
-with `/goal` instead.
+with `/goal` instead. Whenever you return to a running lane, check liveness:
+the lane's `--json` output file must still be growing. If it has been silent
+15+ minutes on one in-flight command, follow "Stall detection and rescue" in
+`dispatch.md` — kill the stuck child process, not the run.
 
 ### 6. Post-flight and integrate (when the runs complete)
 

@@ -90,6 +90,36 @@ conflicting lane and re-spec; don't hand-resolve builder conflicts.
   history, so nothing reaches a branch until the architect's tamper, boundary,
   and gate checks pass.
 
+## Stall detection and rescue (verified live: Windows, Codex 0.139)
+
+A dispatched run is STALLED when its `--json` output file has not grown for
+15+ minutes AND the last event is an `in_progress` command_execution. Silent
+gaps between events are normal model thinking; a shell command that should
+take seconds sitting in flight for 15+ minutes is not.
+
+Diagnose before killing: find the command's child under the codex PID
+(codex → shell → child). Hot-spinning (high CPU) or blocked (zero CPU and
+none of its expected side effects on disk) — hung either way.
+
+Kill the NARROWEST thing: the stuck child process, not the codex run. The
+command returns a failure to the builder, which adapts with its full context
+intact — this has rescued a run with 1.5h of grounding invested. Kill the
+whole run only when the builder re-enters the same hang or the worktree is
+broken; then discard the lane and re-dispatch (hard rule 7).
+
+Known sandbox hang sources (verified): `asyncio.create_subprocess_exec` and
+anything built on it — Playwright browser launch, anyio subprocess pools —
+fails or hangs under workspace-write, while plain `subprocess.run` works.
+Hand-rolled long-running fixture scripts piped through PowerShell
+here-strings are a repeat offender; steer builders toward the repo's existing
+test fixtures.
+
+Spec consequence: when a gate needs a runtime the sandbox cannot execute
+(browser e2e, asyncio-subprocess harnesses), expect the builder to record the
+exact failure as a disagreement/blocker and verify what it can; the architect
+runs that gate outside the sandbox at judgment time — gate verdicts are
+architect-run anyway (hard rule 4). Write the gate file anticipating this.
+
 ## Manual alternative (human-driven)
 
 Paste the builder block into an interactive `codex` session prefixed with
@@ -121,7 +151,10 @@ full implementations only. Verify your work by running the lane's gate
 commands and record the verbatim output. Do NOT commit — the sandbox protects
 .git by design; the architect commits and merges after verification. Do NOT
 delete lock files or escalate privileges if a git command fails; record the
-exact error and continue. When done, write your lane report to
+exact error and continue. Give every potentially long command an explicit
+timeout; if a runtime will not start under the sandbox (asyncio subprocess,
+browser launch), record the exact failure in your lane report and route
+around it — never busy-wait or retry in a loop. When done, write your lane report to
 docs/lanes/<slice>-<lane>.md with RAW results only — tables, numbers, command
 output — no interpretation, no "promising". Every status claim must be backed
 by a command result from this run. Verdicts belong to the architect and the
