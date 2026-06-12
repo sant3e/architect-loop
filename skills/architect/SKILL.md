@@ -75,11 +75,28 @@ review before the verdict: `codex review --base <branch>` or a fresh-context
 subagent prompted to break confidence in the change — calibrated to flag only
 correctness/requirement/invariant gaps with file:line evidence, no style.
 
-### 3. Spec the next slice
+### 3. Research fan-out (optional — most slices skip this)
+
+Run it only when at least one trigger holds: (a) the slice depends on external
+APIs, libraries, or versions not already used in this repo; (b) a technology or
+approach choice needs facts neither you nor the repo has; (c) the human asked
+(`/architect research: <question>`). Otherwise skip — the builder's
+verify-against-reality requirement already covers routine API checks, and
+researching well-understood slices is pure cost.
+
+When a trigger fires, read `research.md` next to this file and follow it:
+3–5 narrow non-overlapping questions → parallel read-only
+`codex exec --search` researchers in the background → you adversarially verify
+the load-bearing claims → you write `docs/prd/<slice>.md` with citations and
+commit it. Researchers gather; you judge and write the PRD. Findings without a
+source URL don't enter the PRD.
+
+### 4. Spec the next slice
 
 One-PR-sized. The spec is the full delegation contract, self-contained:
 
 - **Objective** — what to build and why (give the reason, not just the ask).
+  If a PRD exists (`docs/prd/<slice>.md`), cite it rather than restating it.
 - **Output format** — what the builder reports: raw tables, numbers, commit
   SHAs, test output paths. No interpretation.
 - **Tool guidance** — the exact verification commands for this repo, and the
@@ -93,7 +110,7 @@ One-PR-sized. The spec is the full delegation contract, self-contained:
 - **Effort call** — default `xhigh`; downgrade the slice to `high` when it is
   routine and tightly specified (record which and why in the spec).
 
-### 4. Dispatch
+### 5. Dispatch
 
 Assemble the builder block from `dispatch.md` (PHASE 0/1/2 rules + this spec)
 and launch `codex exec` **in the background** per the canonical command there.
@@ -101,7 +118,7 @@ Do not block on it — end the turn or do other judgment work; multi-hour runs
 are normal. Print the block too, so the human can paste it into an interactive
 `codex` session with `/goal` instead if they prefer to babysit the run.
 
-### 5. Post-flight (when the run completes)
+### 6. Post-flight (when the run completes)
 
 Verify exactly three things, with evidence: (a) `docs/HANDOFF.md` updated with
 raw results only, (b) PHASE 0 disagreements were raised (silent compliance =

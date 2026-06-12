@@ -287,6 +287,42 @@ verdicts on a slice always happen in a **later** architect session than the one
 that dispatched it — the dispatcher never grades the run it launched in the same
 breath (fresh-context judgment, R3).
 
+### Optional pre-spec research fan-out
+
+Between judging and speccing, the architect may run a research phase: 3–5
+parallel `codex exec --sandbox read-only --search` web-research subagents, each
+answering one narrow non-overlapping question, with the architect adversarially
+verifying load-bearing claims and writing `docs/prd/<slice>.md` itself. Design
+decisions behind it:
+
+- **Trigger-gated, not always-on.** "Research if you think it helps" either
+  fires constantly or never; instead the skill names three concrete triggers
+  (slice depends on external APIs/libraries/versions new to the repo; a
+  technology choice needs facts nobody has; the human asks) and defaults to
+  skip — the builder's verify-against-reality requirement already covers
+  routine API checks (R11: scale effort to the task).
+- **Progressive disclosure.** The mechanics live in `research.md`, read only
+  when a trigger fires — the default architect context never pays for them
+  (R12, per [Skills docs](https://code.claude.com/docs/en/skills) guidance to
+  push detail to referenced files).
+- **Codex researchers, Fable judgment.** Research is coverage work — it runs
+  at `high` effort on the flat-rate OpenAI sub, read-only sandboxed with live
+  search ([CLI features](https://developers.openai.com/codex/cli/features);
+  `[tools.web_search] allowed_domains` available as prompt-injection defence).
+  Verification of load-bearing claims and PRD authorship stay with the
+  architect — researchers are explicitly forbidden from making
+  recommendations, the research-side equivalent of "raw results only" (R3).
+- **Findings discipline** mirrors deep-research harnesses: every finding
+  carries a URL, date, exact quote/figure, and confidence tag; disagreements
+  between sources are reported, not resolved; "NOT FOUND" beats inference.
+  Multi-angle decomposition (docs / changelogs / failure reports /
+  alternatives) follows the multi-modal-sweep pattern from
+  [Anthropic's multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system).
+- **The PRD is repo memory; raw findings are not.** `docs/prd/<slice>.md` is
+  committed with citations (R1); raw researcher output stays in the gitignored
+  `.architect/research/`. The builder's PHASE 0 challenges the PRD like any
+  other spec input.
+
 ---
 
 ## 6. Failure modes → mechanical mitigations

@@ -71,7 +71,10 @@ One architect session per work block:
 First run in a repo creates `docs/HANDOFF.md` and `docs/gates/` from the
 template. Every run after that: rules on the builder's open disagreements,
 judges the last slice's raw results against the frozen gates (running the gate
-commands itself — builder claims are hearsay), specs the next one-PR slice,
+commands itself — builder claims are hearsay), optionally fans out parallel
+`codex exec --search` web-research subagents and distills their cited findings
+into a PRD (only when the slice touches APIs/tech new to the repo, or you ask:
+`/architect research: <question>`), specs the next one-PR slice,
 freezes its gates with a commit, and dispatches a fresh
 `codex exec --sandbox workspace-write -a never -m gpt-5.5 -c
 model_reasoning_effort="xhigh"` run in the background. Prefer to babysit the
