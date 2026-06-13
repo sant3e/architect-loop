@@ -133,10 +133,10 @@ should be a deliberate act, not a side-effect of the build loop.
 ## Origin
 
 The original idea came from [this X post by @jumperz](https://x.com/jumperz/status/2065454404623384859)
-about using Fable with Opus subagents. I built architect-loop because I couldn't
+about using Fable with Codex subagents. I built architect-loop because I couldn't
 find an easy way to run that pattern, and because it seemed useful to add a few
 extra operational best practices on top of what Fable can already do when calling
-Opus subagents.
+Codex subagents.
 
 ## License
 
