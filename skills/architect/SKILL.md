@@ -59,7 +59,14 @@ commands and the builder block template: `dispatch.md` next to this file.
    create ignored runtime output, but they must not rewrite lock files,
    generated config, or any file outside the declared implementation file set
    unless the slice explicitly allows it.
-11. **Stop conditions:** failing verification you cannot root-cause,
+11. **Project domain skills are mandatory context.** For Terraform/OpenTofu
+   implementation slices, load the project's `terraform-skill` instructions
+   before writing the spec and require every builder lane to load them before
+   PHASE 0. For AWS provider changes, AWS CLI work, live AWS inspection, IAM,
+   S3, Lambda, Glue, Athena, KMS, or other AWS resources, also require
+   `aws-stuff`. If a required local skill is missing or unreadable, record that
+   in the slice state and treat it as a blocker for risky work.
+12. **Stop conditions:** failing verification you cannot root-cause,
    instructions conflicting with project docs, irreversible/destructive calls,
    or scope growth beyond the slice -> checkpoint to `.scratch` and ask the
    human.
@@ -72,6 +79,14 @@ commands and the builder block template: `dispatch.md` next to this file.
   `AGENTS.md` -> `README.md` -> architecture docs. Also read
   `.scratch/repo-context.md`, `.scratch/architecture-diagrams.md`, and
   `.scratch/lessons.md` when present.
+- Inspect `.claude/skills.list` and `.claude/skills/` when present. Record the
+  local skill paths that are relevant to the slice.
+- If the slice touches Terraform/OpenTofu, read `terraform-skill/SKILL.md`
+  before planning. Load only the referenced Terraform detail files needed for
+  the diagnosed risk category.
+- If the slice touches AWS providers/resources, AWS CLI, IAM, S3, Lambda, Glue,
+  Athena, KMS, CloudWatch, or live AWS state, read `aws-stuff/SKILL.md` before
+  planning and load the relevant AWS reference file only when needed.
 - Learn the exact verification gate from docs or CI config.
 - Once per environment: run `codex --version` and require Codex CLI >= 0.133.
   First dispatch in a new environment is a canary before fan-out.
@@ -134,10 +149,10 @@ local PRD/issues. Create:
 ```
 
 `manifest.json` records at least: slice id, feature slug, base SHA, source
-PRD/issue paths, lane names, allowed file sets, gate commands, integration
-branch, and artifact paths. If local PRD/issues were explicitly skipped, record
-`source_prd_path: null`, `source_issue_path: null`, and
-`issue_exception_reason`.
+PRD/issue paths, lane names, allowed file sets, gate commands, required local
+skills and paths, integration branch, and artifact paths. If local PRD/issues
+were explicitly skipped, record `source_prd_path: null`,
+`source_issue_path: null`, and `issue_exception_reason`.
 
 ### 3. Arbitrate
 
@@ -175,6 +190,9 @@ Write a self-contained spec to
 
 - Objective and why.
 - Source PRD/issue paths.
+- Required local skills: exact paths for `terraform-skill` and, when
+  applicable, `aws-stuff`; whether each was read by the architect; and the
+  specific reference files loaded.
 - Output format: raw tables, numbers, command output paths, commit SHAs. No
   interpretation.
 - Tool guidance: exact verification commands and APIs/formats/versions to
@@ -192,6 +210,11 @@ Write a self-contained spec to
 - Gates: exact commands and thresholds.
 - Effort call: default `xhigh`; use `high` only for routine, tightly specified
   lanes and record why.
+
+If required local skills live outside the worktree through symlinks or might be
+blocked by the builder sandbox, copy task-sized skill excerpts into the packet
+under `.scratch/architect-loop/packet/<slice>/skills/` and point the builder at
+those packet copies.
 
 Freeze gates before dispatch:
 
@@ -221,6 +244,10 @@ Per lane:
 - Ingest the lane report from the lane worktree into
   `.scratch/architect-loop/state/<slice>/reports/`.
 - Confirm PHASE 0 disagreements were raised or explicitly justified.
+- Confirm the lane report lists required local skills used and extra context
+  loaded. A Terraform/OpenTofu lane that did not load `terraform-skill`, or an
+  AWS lane that did not load required `aws-stuff`, is incomplete unless the
+  missing file was explicitly unavailable and the architect accepted that risk.
 - Verify the gate snapshot in the main checkout still matches.
 - Check `git status --porcelain --untracked-files=all` in the worktree.
 - Check changed and untracked source files are only inside the lane's allowed

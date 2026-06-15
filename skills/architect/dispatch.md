@@ -96,6 +96,11 @@ codex exec -C "$WT" --sandbox workspace-write \
   - < "$STATE/dispatch/$LANE.prompt.md"
 ```
 
+If required local skill files are linked outside the worktree or may be blocked
+by the builder sandbox, copy task-sized excerpts into
+`$WT/.scratch/architect-loop/packet/$SLICE/skills/` and reference those packet
+paths in the dispatch prompt.
+
 Launch 2-4 lanes in parallel only after file-touch sets are checked for overlap.
 Most slices should remain one lane.
 
@@ -131,6 +136,12 @@ git -C "$WT" diff "$BASE" -- <allowed-files...>
 Fail the lane if any changed or untracked implementation file is outside the
 lane's declared allowed file set. Ignored `.scratch` files are lane artifacts
 and must not be staged.
+
+Fail or return the lane for clarification if its report does not list the
+required local skills it loaded. Terraform/OpenTofu lanes must load
+`terraform-skill`; lanes that touch AWS providers/resources, AWS CLI, IAM, S3,
+Lambda, Glue, Athena, KMS, CloudWatch, or live AWS state must also load
+`aws-stuff`.
 
 Gate commands must not rewrite lock files, generated config, or unrelated
 source files. If a Terraform/OpenTofu init or validate step wants to update
@@ -199,6 +210,17 @@ Paste the builder block into an interactive `codex` session prefixed with
 ```text
 Execute the architect spec below. Operating rules:
 
+REQUIRED LOCAL SKILLS - Before PHASE 0:
+Read every skill file listed in the REQUIRED LOCAL SKILLS section below. If the
+slice is Terraform/OpenTofu and `terraform-skill` is available, you must read it
+and apply its response contract, risk categories, validation rules, and rollback
+expectations. If the slice touches AWS providers/resources, AWS CLI, IAM, S3,
+Lambda, Glue, Athena, KMS, CloudWatch, or live AWS state and `aws-stuff` is
+available, you must read it and apply its credential, profile, query filtering,
+preview, and destructive-operation rules. If a required skill path is missing or
+unreadable, state that in PHASE 0 and mark the lane
+COMPLETE_WITH_CONCERNS or BLOCKED depending on risk.
+
 PHASE 0 - Before any code: reply with your plan and EVERY disagreement you have
 with this spec, with reasons, citing real files in this repo. Silent compliance
 is a failure. Silent scope additions are a failure. If you have no
@@ -230,8 +252,9 @@ When done, write your lane report to:
 
 Use RAW results only: tables, numbers, command output, file paths, SHAs. No
 interpretation, no "promising". Every status claim must be backed by a command
-result from this run. Keep the report compact. End it with exactly one status
-line:
+result from this run. Include `Skills used:` and `Extra context loaded:` lines
+covering every required local skill. Keep the report compact. End it with
+exactly one status line:
 STATUS: COMPLETE | COMPLETE_WITH_CONCERNS (list them) | BLOCKED (exact blocker
 and what you tried).
 
@@ -245,6 +268,9 @@ handled end-to-end; do not stop at analysis or partial fixes.
 ...
 
 === TOOL GUIDANCE (verification commands; verify-against-reality list) ===
+...
+
+=== REQUIRED LOCAL SKILLS ===
 ...
 
 === BOUNDARIES (may touch / must not touch / out of scope) ===
