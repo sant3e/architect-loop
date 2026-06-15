@@ -7,8 +7,9 @@ description: >
   production patterns, web, experts), then verifies claims against sources and
   synthesizes a decision-oriented report. Use when
   brainstorming a project or feature, choosing a technology, or asked to
-  "research X", "what's the state of the art", "deep research". For narrow
-  slice-level fact checks inside the build loop, /architect handles those inline.
+  "research X", "what's the state of the art", "deep research". Reports and raw
+  findings are local .scratch artifacts. For narrow slice-level fact checks
+  inside the build loop, /architect handles those inline.
 effort: high
 ---
 
@@ -71,10 +72,14 @@ dispatch. State the plan in a few lines; proceed unless the user redirects.
 One fresh researcher per lane, all parallel, in the background:
 
 ```bash
+REPO=<repo-root>
+TOPIC=<topic-slug>
+mkdir -p "$REPO/.scratch/architect-loop/research/$TOPIC"
+
 codex exec --sandbox read-only -c web_search="live" \
   -m gpt-5.5 -c model_reasoning_effort="high" \
-  -o .architect/research/<NN>-<lane>.md \
-  - < .architect/research/<NN>-<lane>.prompt.md
+  -o ".scratch/architect-loop/research/$TOPIC/<NN>-<lane>.md" \
+  - < ".scratch/architect-loop/research/$TOPIC/<NN>-<lane>.prompt.md"
 ```
 
 Write each lane block to a `.prompt.md` file and pass it via stdin (`-`) —
@@ -84,8 +89,8 @@ never as a shell argument; quote-mangling shells make codex hang on stdin.
 Older CLIs: `--enable web_search` (0.13x) or `-c tools.web_search=true`
 (< 0.133); `--search` is TUI-only — exec rejects it. Launch ONE canary lane
 and confirm it starts cleanly before fanning out. If Codex is unavailable,
-run lanes as read-only Claude subagents with web search — the lane blocks
-work verbatim.)
+checkpoint the brief and ask the human how to proceed; do not fall back to
+disabled built-in Claude subagents.)
 
 Every lane block carries the full contract — objective, output format, source
 guidance, boundaries — plus:
@@ -137,7 +142,8 @@ two refinement rounds — past that you're chasing nonexistent information.
 
 ### 6. Synthesize (one pass, one author — you)
 
-Parallelize gathering, never synthesis. Write `docs/research/<topic>.md`:
+Parallelize gathering, never synthesis. Write
+`.scratch/architect-loop/research/<topic>/REPORT.md`:
 
 - **Answer first** (BLUF), then evidence, then method.
 - The brief, restated.
@@ -150,10 +156,13 @@ Parallelize gathering, never synthesis. Write `docs/research/<topic>.md`:
   or experiment that would resolve it (this doubles as the next round's input).
 - Citations dated and tier-labeled: `[primary, 2026-04]`.
 
-Commit the report. Raw findings stay in `.architect/research/` (gitignored).
+Do not commit the report unless the human explicitly asks. Raw findings stay in
+`.scratch/architect-loop/research/<topic>/`.
 
 ### 7. Hand off
 
-If this feeds the build loop: distill the report into `docs/prd/<slice>.md`
-per `/architect` and continue there. The builder's PHASE 0 will challenge the
-PRD's claims — that's a feature.
+If this feeds the build loop: distill the report into
+`.scratch/<feature-slug>/PRD.md` or
+`.scratch/architect-loop/state/<slice>/research.md` per `/architect` and
+continue there. The builder's PHASE 0 will challenge the PRD's claims — that's
+a feature.

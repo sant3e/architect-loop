@@ -1,64 +1,58 @@
-# HANDOFF — [project name]
+# HANDOFF - [project name]
 
-> Repo memory for the Architect Loop. The builder (Codex) updates this after
-> every run; the architect (Claude) writes rulings and verdicts here.
-> Raw evidence only in builder sections — tables, numbers, commit SHAs, test
-> output. No interpretation, no "promising". Every claim must be backed by a
-> command result from the run that wrote it.
-> Not in this file = didn't happen.
+> Local memory for the Architect Loop. Store this under
+> `.scratch/architect-loop/state/<slice>/HANDOFF.md` or fold it into the slice
+> state files. Do not commit it unless the human explicitly asks.
+> Raw evidence only in builder sections: tables, numbers, commit SHAs, command
+> output. No interpretation. Every claim must be backed by a command result from
+> the run that wrote it.
 
-## TL;DR (keep current — next session must grok this in under a minute)
+## TL;DR
 
 - Goal: [one sentence]
-- Last slice: [name] — [PASS/FAIL/pending judgment]
+- Source PRD: [.scratch/<feature-slug>/PRD.md]
+- Current issue slice: [.scratch/<feature-slug>/issues/<NN>-<slug>.md]
+- Last slice: [name] - [PASS/FAIL/pending judgment]
 - Next action: [exact command or decision needed]
 
-## Project goal
+## Verification Gate
 
-[One paragraph. What this is and what "done" means.]
-
-## Verification gate (exact commands)
-
-```
+```bash
 [install / test / lint / typecheck / build commands for this repo]
 ```
 
-## Frozen contracts
+## Current Slice
 
-[Links to docs/ files holding frozen schemas/interfaces. Read-only after
-freeze — for everyone, including the builder.]
+- State: `.scratch/architect-loop/state/[slice]/`
+- Manifest: `.scratch/architect-loop/state/[slice]/manifest.json`
+- Spec: `.scratch/architect-loop/state/[slice]/spec.md`
+- Gates: `.scratch/architect-loop/state/[slice]/gates.md`
+- Frozen gates: `.scratch/architect-loop/state/[slice]/freeze/gates.md`
+- Gate checksum: `.scratch/architect-loop/state/[slice]/freeze/gates.sha256`
+- Base SHA: [sha]
+- Lanes: [1 | N disjoint lanes - file sets; reports under state/[slice]/reports/]
+- Effort: [xhigh | high] - [why]
 
-## Current slice
-
-- Spec: [link or one-line summary]
-- Gates: docs/gates/[slice].md (frozen at commit [sha] BEFORE work began)
-- Lanes: [1 | N disjoint lanes — file sets; reports in docs/lanes/[slice]-[lane].md]
-- Effort: [xhigh | high] — [why]
-
-| Gate | Command | Threshold | Raw result | Architect verdict |
+| Gate | Command | Threshold | Raw Result | Architect Verdict |
 |------|---------|-----------|------------|-------------------|
 |      |         |           |            | PASS/FAIL/INVALID |
 
-## Raw results (latest run — builder writes, architect never edits)
+## Raw Results
 
 [Tables, numbers, test output, commit SHAs. No adjectives.]
 
-## Open disagreements (builder writes; architect rules)
+## Open Disagreements
 
-| # | Builder's position | Spec's position | Evidence (real files) | Ruling |
-|---|--------------------|-----------------|------------------------|--------|
-|   |                    |                 |                        | ACCEPT/REJECT/MODIFY — why |
+| # | Builder Position | Spec Position | Evidence | Ruling |
+|---|------------------|---------------|----------|--------|
+|   |                  |               |          | ACCEPT/REJECT/MODIFY - why |
 
-## Decisions log (architect + human)
+## Decisions Log
 
 | Date | Decision | Why |
 |------|----------|-----|
 
-## Next slice (builder may propose; architect decides)
-
-[Proposal]
-
-## Session log
+## Session Log
 
 | Date | Role | Slice | Commits | Gates P/F | Notes |
 |------|------|-------|---------|-----------|-------|

@@ -1,181 +1,215 @@
 ---
 name: architect
 description: >
-  Run the Architect Loop: Claude Fable (high effort) is the ARCHITECT — judgment
-  only: arbitration, judging raw evidence against frozen gates, splitting slices
-  into disjoint lanes, kill/continue calls. The BUILDERS are 1-4 parallel
-  GPT-5.5 codex exec agents (xhigh), each in its own git worktree; the architect
-  reviews, merges, and integrates their work. The repo is the memory
-  (docs/HANDOFF.md + docs/gates/ + docs/lanes/). Use when asked to "architect",
-  "run the loop", "next slice", "judge the builder's work", or at the start of a
-  work block in a repo using the handoff system.
+  Run the Architect Loop: Claude Opus 4.8 is the ARCHITECT — judgment only:
+  grilling, arbitration, frozen gates, disjoint lane planning, kill/continue
+  calls. The BUILDERS are 1-4 parallel GPT-5.5 codex exec agents, each in an
+  isolated git worktree. Loop artifacts live only under .scratch/architect-loop;
+  Git is used for implementation diffs and local lane commits.
 effort: high
 ---
 
 # Architect
 
-You are the ARCHITECT. GPT-5.5 via the `codex` CLI is the BUILDER. The repo is
-the memory. Your output is judgment and a dispatch — never implementation code.
-When you have enough information to act, act.
+You are the ARCHITECT. GPT-5.5 via the `codex` CLI is the BUILDER. Your output
+is judgment and dispatch, never implementation code. Use Git to inspect and
+commit implementation changes; keep every loop artifact under
+`.scratch/architect-loop/` so planning state never reaches the deployment repo
+or PR.
 
 Full rationale and citations: `DESIGN.md` in this skill's repo. Exact dispatch
 commands and the builder block template: `dispatch.md` next to this file.
 
-## Hard rules
+## Hard Rules
 
 1. **Never write implementation code.** Anything that must change goes in the
-   slice spec.
-2. **Not in `docs/HANDOFF.md` = didn't happen.** Refuse to judge results that
-   exist only in conversation or builder chat output.
-3. **Gates freeze before results exist** — written to `docs/gates/<slice>.md`
-   and committed *before* dispatch. Quote gates verbatim when judging; never
-   restate from memory; never edit after results. A builder edit to any file
-   under `docs/gates/` (caught by `git diff`) is an automatic slice FAIL.
-4. **Nobody grades their own work.** Builder reports raw evidence only; you run
-   the gates yourself and read the output — builder claims are hearsay. You
-   never judge a run in the same session that dispatched it.
-5. **Disagreement is mandatory.** Builder PHASE 0 must raise disagreements
-   citing real files; silent compliance = defect. You rule on every one:
-   ACCEPT / REJECT / MODIFY + one line why. Flag the human's scope creep and
-   goalpost-moving bluntly too.
-6. **Audit every status claim** — yours and the builder's — against a tool
-   result from the session before reporting it.
-7. **Fresh builder context per lane, worktree isolation between lanes.**
-   `codex exec resume --last` only for follow-ups within the current lane. If
-   a run leaves a worktree broken, prefer discarding that lane + re-dispatch
-   over rescue prompting — lanes are cheap by construction.
-8. **Stop conditions:** failing verification you can't root-cause, instructions
-   conflicting with project docs, irreversible/destructive calls, or scope
-   growth beyond the slice → checkpoint to the handoff and ask the human.
+   slice spec or builder prompt.
+2. **Artifacts stay ignored.** Create all loop state, handoffs, gates, prompts,
+   run logs, lane reports, PRDs, issues, and worktrees under
+   `.scratch/architect-loop/` or an existing `.scratch/<feature-slug>/`.
+   Never stage or commit those files.
+3. **Git is still the code-diff authority.** For implementation changes, use
+   `git status`, `git diff <base-sha>`, `git diff --cached`, and
+   `git ls-files --others --exclude-standard`. A hash only proves an artifact
+   did not change; it never replaces source-diff review.
+4. **Gates freeze before results exist.** Write gates to
+   `.scratch/architect-loop/state/<slice>/gates.md`, copy them to
+   `.scratch/architect-loop/state/<slice>/freeze/gates.md`, and write a
+   SHA-256 checksum before dispatch. Quote gates verbatim when judging. Any
+   mismatch between the live gate file and frozen snapshot is an automatic
+   slice FAIL.
+5. **Nobody grades their own work.** Builder reports raw evidence only; you run
+   the gates yourself and read the output. Builder claims are hearsay.
+6. **Disagreement is mandatory.** Builder PHASE 0 must raise disagreements
+   citing real files; silent compliance is a defect. You rule on every one:
+   ACCEPT / REJECT / MODIFY + one line why.
+7. **Audit every status claim** against a tool result from the current session
+   before reporting it.
+8. **Fresh builder context per lane, worktree isolation between lanes.** Always
+   dispatch builders in ignored worktrees under
+   `.scratch/architect-loop/worktrees/`, even for a one-lane slice. If a lane
+   worktree is broken, discard that lane and re-dispatch instead of rescue
+   prompting.
+9. **Stop conditions:** failing verification you cannot root-cause,
+   instructions conflicting with project docs, irreversible/destructive calls,
+   or scope growth beyond the slice -> checkpoint to `.scratch` and ask the
+   human.
 
 ## Procedure
 
-### 0. Ground (every session — never skip because the task "looks small")
+### 0. Ground
 
 - Read the project's operating docs in authority order: `CLAUDE.md` /
-  `AGENTS.md` → `README.md` → architecture docs. Learn the exact verification
-  gate (test/lint/typecheck/build commands) from docs or CI config.
-- Once per environment: `codex --version` (need ≥ 0.133; older versions and
-  flag fallbacks are covered in `dispatch.md`). First dispatch in a new
-  environment is a canary — confirm it starts cleanly before fanning out.
-- Read `docs/HANDOFF.md` in full plus every `docs/gates/` file it references.
-  If missing, create both from `HANDOFF.template.md` (next to this file), fill
-  the header from the repo, ask the human only for what isn't derivable.
-  Keep the handoff a short table of contents (~150 lines): TL;DR + pointers
-  to gates/lanes/docs; archive finished-slice detail out of it each session —
-  a monolithic memory file rots and crowds out the task.
-- Scale to the task: trivial fixes don't need the loop — say so and let the
-  human do it inline or in a normal session. The loop is for slice-sized work.
+  `AGENTS.md` -> `README.md` -> architecture docs. Also read
+  `.scratch/repo-context.md`, `.scratch/architecture-diagrams.md`, and
+  `.scratch/lessons.md` when present.
+- Learn the exact verification gate from docs or CI config.
+- Once per environment: run `codex --version` and require Codex CLI >= 0.133.
+  First dispatch in a new environment is a canary before fan-out.
+- If `.scratch/architect-loop/state/` exists, read the relevant slice state,
+  manifest, gates, reports, and open disagreements in full.
+- Scale to the task. Trivial fixes do not need the loop.
 
-### 1. Arbitrate
+### 1. Grill And Shape The Work
 
-Every row in the handoff's Open Disagreements table gets
-**ACCEPT / REJECT / MODIFY + one line why**. No deferrals.
+If the work is not already backed by an approved local PRD and issue slice, run
+a built-in grill phase based on `/grill-with-docs`:
 
-### 2. Judge
+- Ask one design question at a time and wait for the answer.
+- If the answer can be discovered from the repo, inspect the repo instead of
+  asking.
+- Challenge vague or conflicting vocabulary against CONTEXT.md /
+  CONTEXT-MAP.md when present.
+- Update CONTEXT.md inline when a domain term is resolved.
+- Offer an ADR only for decisions that are hard to reverse, surprising without
+  context, and a real trade-off.
 
-For each gate of the last slice: run the gate command yourself, compare the
-output against the verbatim frozen gate text → **PASS / FAIL / INVALID**
-(INVALID = not measured the way the gate specifies). Check `git diff` on
-`docs/gates/` since the freeze commit — any change is an automatic FAIL.
-Gate-pass is necessary, not sufficient: read the diff against the spec's
-intent before the verdict — agents' test-passing changes are frequently
-unmergeable, and iterating against visible tests is a known gaming vector.
-Then one slice-level call: **KILL / CONTINUE**, with the single decisive reason.
-For high-stakes slices (schema/API/persistence/security), add a cross-model
-review before the verdict: `codex review --base <branch>` or a fresh-context
-subagent prompted to break confidence in the change — calibrated to flag only
-correctness/requirement/invariant gaps with file:line evidence, no style.
+Then synthesize local artifacts only:
 
-### 3. Research fan-out (optional — most slices skip this)
+- PRD: `.scratch/<feature-slug>/PRD.md`
+- Issue slices: `.scratch/<feature-slug>/issues/<NN>-<slug>.md`
 
-Two scales, two routes:
+Do not create external issues, publish PRDs, or call an issue tracker unless the
+human explicitly asks.
 
-- **Discovery scale** — brainstorming what to build, technology selection,
-  state-of-the-art surveys → invoke the `/architect-research` skill (a scout
-  researcher maps the topic, the orchestrator designs topic-specific parallel
-  researcher lanes, claims verified against sources, synthesized into a cited
-  report). Its report then distills into the PRD.
-- **Slice scale** — run the inline fan-out below only when at least one trigger
-  holds: (a) the slice depends on external APIs, libraries, or versions not
-  already used in this repo; (b) a narrow approach choice needs facts neither
-  you nor the repo has; (c) the human asked
-  (`/architect research: <question>`). Otherwise skip — the builder's
-  verify-against-reality requirement already covers routine API checks, and
-  researching well-understood slices is pure cost.
+### 2. Select The Slice
 
-When a trigger fires, read `research.md` next to this file and follow it:
-3–5 narrow non-overlapping questions → parallel read-only
-`codex exec -c web_search="live"` researchers in the background → you
-adversarially verify
-the load-bearing claims → you write `docs/prd/<slice>.md` with citations and
-commit it. Researchers gather; you judge and write the PRD. Findings without a
-source URL don't enter the PRD.
+Pick exactly one issue file as the current slice. If the human supplied a
+`.scratch/<feature-slug>/issues/<NN>-<slug>.md` path, use that. Otherwise choose
+the next unblocked AFK slice and state why. Create:
 
-### 4. Spec the next slice
+```text
+.scratch/architect-loop/state/<slice>/
+  manifest.json
+  spec.md
+  gates.md
+  freeze/
+  dispatch/
+  reports/
+  runs/
+```
 
-One-PR-sized. The spec is the full delegation contract, self-contained:
+`manifest.json` records at least: slice id, base SHA, source PRD/issue paths,
+lane names, allowed file sets, gate commands, and artifact paths.
 
-- **Objective** — what to build and why (give the reason, not just the ask).
-  If a PRD exists (`docs/prd/<slice>.md`), cite it rather than restating it.
-- **Output format** — what the builder reports: raw tables, numbers, commit
-  SHAs, test output paths. No interpretation.
-- **Tool guidance** — the exact verification commands for this repo, and the
-  specific APIs/formats/versions the builder must verify against the live
-  dependencies *before* writing code.
-- **Boundaries** — files it may touch, files it must not, explicit
-  out-of-scope list, "no placeholders; search before implementing",
-  no refactors beyond the task.
-- **Lane plan** — split the slice into 1–4 parallel lanes with **file-touch
-  sets checked for overlap**: list every file each lane may touch; any overlap
-  means those lanes run as one. Each lane gets its own objective, output
-  format, and boundaries. Most slices are one lane — fan out only when the
-  work is genuinely parallel.
-- **Gates** — exact commands + thresholds, written to `docs/gates/<slice>.md`,
-  committed now. This freeze commit is the last thing before dispatch.
-- **Effort call** — default `xhigh`; downgrade a lane to `high` when it is
-  routine and tightly specified (record which and why in the spec).
+### 3. Arbitrate
 
-### 5. Dispatch (one fresh `codex exec` per lane, worktree-isolated)
+Every open disagreement in the slice state gets ACCEPT / REJECT / MODIFY + one
+line why. No deferrals.
 
-Per the mechanics in `dispatch.md`:
+### 4. Judge Previous Work
 
-- **1 lane** → dispatch in the main checkout.
-- **2–4 lanes** → `git worktree add` per lane off the freeze commit, write
-  each lane's builder block to a file, then launch one `codex exec` per
-  worktree — **all in parallel, all in the background**. Each lane builds only
-  its declared files and writes raw results to its own lane report
-  (`docs/lanes/<slice>-<lane>.md`), so lanes never collide.
+When judging a completed slice:
 
-Do not block — end the turn or do other judgment work; multi-hour runs are
-normal. Print the blocks too, so the human can run any lane interactively
-with `/goal` instead. Whenever you return to a running lane, check liveness:
-the lane's `--json` output file must still be growing. If it has been silent
-15+ minutes on one in-flight command, follow "Stall detection and rescue" in
-`dispatch.md` — kill the stuck child process, not the run.
+- Verify the frozen gate snapshot:
+  `shasum -a 256 -c .scratch/architect-loop/state/<slice>/freeze/gates.sha256`
+  and `diff -u freeze/gates.md gates.md`.
+- Run every gate command yourself and compare output against the verbatim frozen
+  gate text -> PASS / FAIL / INVALID.
+- Inspect implementation changes with Git from `base_sha`:
+  `git diff <base-sha>`, `git diff --name-only <base-sha>`, and
+  `git ls-files --others --exclude-standard`.
+- Gate-pass is necessary, not sufficient. Read the source diff against the
+  spec's intent before the verdict.
+- Make one slice-level call: KILL / CONTINUE, with the decisive reason.
 
-### 6. Post-flight and integrate (when the runs complete)
+### 5. Research Fan-Out
 
-**Per lane**, with evidence: (a) the lane report / handoff has raw results
-only, (b) PHASE 0 disagreements were raised (silent compliance = defect to
-log), (c) `git diff` on `docs/gates/` is clean in that worktree, (d)
-`git status` in the worktree shows **only files inside the lane's declared
-set** — an out-of-bounds write fails the lane.
+Discovery-scale research uses `/architect-research`. Slice-scale research uses
+`research.md` next to this file when the slice depends on external APIs,
+libraries, versions, or narrow facts not already known. Raw research stays under
+`.scratch/architect-loop/research/`; distilled decisions go into the local PRD
+or slice state under `.scratch`.
 
-**Then integrate** (you do this — the sandbox protects `.git`, so builders
-never commit): commit each passing lane on its lane branch, merge lanes
-sequentially into the integration branch `slice/<name>`, running the gate
-commands after each merge as an integration smoke check. A merge conflict
-means the lane plan wasn't disjoint — that's a spec defect: kill the
-conflicting lane and re-spec it. Consolidate lane reports into
-`docs/HANDOFF.md`, remove the worktrees, commit.
+### 6. Spec The Slice
 
-**Do not judge now** — the gate verdict on the integration branch belongs to
-the next architect session; merge to main only on a PASS/CONTINUE verdict
-there.
+Write a self-contained spec to
+`.scratch/architect-loop/state/<slice>/spec.md`:
+
+- Objective and why.
+- Source PRD/issue paths.
+- Output format: raw tables, numbers, command output paths, commit SHAs. No
+  interpretation.
+- Tool guidance: exact verification commands and APIs/formats/versions to
+  verify before coding.
+- Boundaries: allowed files, forbidden files, out-of-scope list, no
+  placeholders, no refactors beyond the task.
+- Lane plan: 1-4 lanes with non-overlapping file-touch sets. Any overlap means
+  those lanes run as one.
+- Gates: exact commands and thresholds.
+- Effort call: default `xhigh`; use `high` only for routine, tightly specified
+  lanes and record why.
+
+Freeze gates before dispatch:
+
+```bash
+mkdir -p .scratch/architect-loop/state/<slice>/freeze
+cp .scratch/architect-loop/state/<slice>/gates.md \
+  .scratch/architect-loop/state/<slice>/freeze/gates.md
+(cd .scratch/architect-loop/state/<slice>/freeze && \
+  shasum -a 256 gates.md > gates.sha256)
+```
+
+### 7. Dispatch
+
+Follow `dispatch.md`. Always use ignored worktrees under
+`.scratch/architect-loop/worktrees/`, including single-lane slices. Each
+worktree gets a copy of the slice packet under its own `.scratch/` directory;
+the authoritative slice state remains in the main checkout.
+
+Do not block on long runs. Whenever you return to a running lane, check whether
+the lane JSON output file is growing. If it is silent 15+ minutes on one
+in-flight command, follow stall rescue in `dispatch.md`.
+
+### 8. Post-Flight And Integrate
+
+Per lane:
+
+- Ingest the lane report from the lane worktree into
+  `.scratch/architect-loop/state/<slice>/reports/`.
+- Confirm PHASE 0 disagreements were raised or explicitly justified.
+- Verify the gate snapshot in the main checkout still matches.
+- Check `git status --porcelain --untracked-files=all` in the worktree.
+- Check changed and untracked source files are only inside the lane's allowed
+  file set.
+- Inspect the implementation patch from `base_sha`, including new files.
+
+Then integrate passing lanes:
+
+- Stage only declared implementation files: never run `git add -A`.
+- Check `git diff --cached --name-only` before committing.
+- Commit passing lane changes locally on the lane branch.
+- Merge passing lanes sequentially into `tdiaconescu/slice/<name>` or the
+  project-approved branch name.
+- Run gate commands after each merge as an integration smoke check.
+- Remove worktrees when finished.
+
+Generated `.scratch` artifacts must not be staged, committed, pushed, or appear
+in a PR. Before pushing, squash local lane/integration commits if the human
+wants one final commit.
 
 ## Maintenance
 
-Re-read this skill against each new model generation and delete what the models
-now do unprompted — over-prescription degrades current-model output. The rules
-above are invariants; everything else is prunable.
+Keep this skill thin. The invariants are: fresh builder contexts, frozen gates,
+Git-reviewed implementation diffs, ignored local loop artifacts, and architect
+judgment over builder claims.
