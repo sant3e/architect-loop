@@ -50,7 +50,16 @@ commands and the builder block template: `dispatch.md` next to this file.
    `.scratch/architect-loop/worktrees/`, even for a one-lane slice. If a lane
    worktree is broken, discard that lane and re-dispatch instead of rescue
    prompting.
-9. **Stop conditions:** failing verification you cannot root-cause,
+9. **Every implementation slice has local planning artifacts.** A research
+   report, handoff, or detailed user prompt is source material, not an
+   executable slice. Before dispatch, create or select a local PRD and issue
+   file under `.scratch/<feature-slug>/`, unless the human explicitly says to
+   skip local PRD/issues for this run.
+10. **Verification gates must not mutate unrelated files.** Gate commands may
+   create ignored runtime output, but they must not rewrite lock files,
+   generated config, or any file outside the declared implementation file set
+   unless the slice explicitly allows it.
+11. **Stop conditions:** failing verification you cannot root-cause,
    instructions conflicting with project docs, irreversible/destructive calls,
    or scope growth beyond the slice -> checkpoint to `.scratch` and ask the
    human.
@@ -72,8 +81,19 @@ commands and the builder block template: `dispatch.md` next to this file.
 
 ### 1. Grill And Shape The Work
 
+Before any build dispatch, make sure the implementation work is backed by local
+planning artifacts:
+
+- PRD: `.scratch/<feature-slug>/PRD.md`
+- Issue slices: `.scratch/<feature-slug>/issues/<NN>-<slug>.md`
+
+A raw research report under `.scratch/architect-loop/research/`, a handoff, or
+a detailed human prompt is not enough by itself. Treat it as input and distill
+it into the PRD and at least one issue slice first.
+
 If the work is not already backed by an approved local PRD and issue slice, run
-a built-in grill phase based on `/grill-with-docs`:
+a built-in grill phase based on `/grill-with-docs` before writing those
+artifacts:
 
 - Ask one design question at a time and wait for the answer.
 - If the answer can be discovered from the repo, inspect the repo instead of
@@ -84,19 +104,23 @@ a built-in grill phase based on `/grill-with-docs`:
 - Offer an ADR only for decisions that are hard to reverse, surprising without
   context, and a real trade-off.
 
-Then synthesize local artifacts only:
-
-- PRD: `.scratch/<feature-slug>/PRD.md`
-- Issue slices: `.scratch/<feature-slug>/issues/<NN>-<slug>.md`
+Then synthesize local artifacts only. If the human already supplied a precise
+target state and source research, the PRD can be short and the issue list can
+contain one vertical slice, but the files still exist so later sessions have a
+stable source of truth.
 
 Do not create external issues, publish PRDs, or call an issue tracker unless the
-human explicitly asks.
+human explicitly asks. Only skip local PRD/issues if the human explicitly asks
+to skip them for this run; record that exception and the reason in
+`manifest.json`.
 
 ### 2. Select The Slice
 
 Pick exactly one issue file as the current slice. If the human supplied a
 `.scratch/<feature-slug>/issues/<NN>-<slug>.md` path, use that. Otherwise choose
-the next unblocked AFK slice and state why. Create:
+the next unblocked AFK slice and state why. Do not create slice state directly
+from a freeform prompt or research report unless the human explicitly skipped
+local PRD/issues. Create:
 
 ```text
 .scratch/architect-loop/state/<slice>/
@@ -109,8 +133,11 @@ the next unblocked AFK slice and state why. Create:
   runs/
 ```
 
-`manifest.json` records at least: slice id, base SHA, source PRD/issue paths,
-lane names, allowed file sets, gate commands, and artifact paths.
+`manifest.json` records at least: slice id, feature slug, base SHA, source
+PRD/issue paths, lane names, allowed file sets, gate commands, integration
+branch, and artifact paths. If local PRD/issues were explicitly skipped, record
+`source_prd_path: null`, `source_issue_path: null`, and
+`issue_exception_reason`.
 
 ### 3. Arbitrate
 
@@ -154,6 +181,12 @@ Write a self-contained spec to
   verify before coding.
 - Boundaries: allowed files, forbidden files, out-of-scope list, no
   placeholders, no refactors beyond the task.
+- Mutability limits: gate commands must not update files outside the allowed
+  file set. For Terraform/OpenTofu, do not use provider upgrade flags during
+  verification. Prefer readonly lock behavior such as
+  `terraform init -backend=false -lockfile=readonly` when the repo/tool version
+  supports it. If verification requires a lockfile change, stop and ask unless
+  the lockfile is part of the declared slice.
 - Lane plan: 1-4 lanes with non-overlapping file-touch sets. Any overlap means
   those lanes run as one.
 - Gates: exact commands and thresholds.
@@ -202,6 +235,9 @@ Then integrate passing lanes:
 - Merge passing lanes sequentially into `tdiaconescu/slice/<name>` or the
   project-approved branch name.
 - Run gate commands after each merge as an integration smoke check.
+- After every gate run and before any final verdict, check `git status --short`
+  and fail or ask if verification changed files outside the declared
+  implementation file set.
 - Remove worktrees when finished.
 
 Generated `.scratch` artifacts must not be staged, committed, pushed, or appear

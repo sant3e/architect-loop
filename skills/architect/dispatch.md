@@ -14,6 +14,12 @@ All loop artifacts live under `.scratch/architect-loop/` and are expected to be
 ignored by Git. Git is still used for implementation diffs and local lane
 commits.
 
+Implementation slices are selected from local planning artifacts under
+`.scratch/<feature-slug>/`: a `PRD.md` plus at least one
+`issues/<NN>-<slug>.md`. Research reports and handoffs are inputs to those
+files, not replacements for them, unless the human explicitly skips local
+PRD/issues for the run.
+
 Per slice:
 
 ```text
@@ -126,6 +132,13 @@ Fail the lane if any changed or untracked implementation file is outside the
 lane's declared allowed file set. Ignored `.scratch` files are lane artifacts
 and must not be staged.
 
+Gate commands must not rewrite lock files, generated config, or unrelated
+source files. If a Terraform/OpenTofu init or validate step wants to update
+`.terraform.lock.hcl`, rerun with readonly lock behavior when supported, such as
+`terraform init -backend=false -lockfile=readonly`. If the gate cannot run
+without changing out-of-scope files, stop and record the blocker instead of
+including the mutation in the lane.
+
 For new allowed files, inspect them explicitly and then stage declared files
 only:
 
@@ -204,11 +217,13 @@ No placeholder implementations. Search the codebase before implementing.
 Full implementations only.
 
 Verify your work by running the lane's gate commands and record verbatim
-output. Do NOT commit. Do NOT delete lock files or escalate privileges if a git
-command fails; record the exact error and continue. Give every potentially long
-command an explicit timeout. If a runtime will not start under the sandbox,
-record the exact failure in your lane report and route around it; never
-busy-wait or retry in a loop.
+output. Do NOT commit. Do NOT delete or update lock files. If Terraform/OpenTofu
+or another tool wants to rewrite a lock file outside your declared boundary,
+record the exact command and failure/blocker instead of accepting the change. Do
+NOT escalate privileges if a git command fails; record the exact error and
+continue. Give every potentially long command an explicit timeout. If a runtime
+will not start under the sandbox, record the exact failure in your lane report
+and route around it; never busy-wait or retry in a loop.
 
 When done, write your lane report to:
 .scratch/architect-loop/reports/<slice>-<lane>.md
