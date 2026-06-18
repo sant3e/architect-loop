@@ -5,7 +5,7 @@ description: >
   grilling, arbitration, frozen gates, disjoint lane planning, kill/continue
   calls. The BUILDERS are 1-4 parallel GPT-5.5 codex exec agents, each in an
   isolated git worktree. Loop artifacts live only under .scratch/architect-loop;
-  Git is used for implementation diffs and local lane commits.
+  Git is used for implementation diffs and a local review branch commit.
 effort: high
 ---
 
@@ -55,21 +55,32 @@ commands and the builder block template: `dispatch.md` next to this file.
    executable slice. Before dispatch, create or select a local PRD and issue
    file under `.scratch/<feature-slug>/`, unless the human explicitly says to
    skip local PRD/issues for this run.
-10. **Verification gates must not mutate unrelated files.** Gate commands may
-   create ignored runtime output, but they must not rewrite lock files,
-   generated config, or any file outside the declared implementation file set
-   unless the slice explicitly allows it.
+10. **Verification gates are exact and non-mutating.** A gate is PASS only when
+   the frozen command, or a frozen allowed variant, ran with the recorded cwd/env
+   and met the threshold. Gate commands may create ignored runtime output, but
+   must not rewrite lock files, generated config, or any undeclared source file.
+   Any ad hoc command/env change, lock bypass, skipped subcommand, or mutation is
+   DEVIATED or BLOCKED, not PASS.
 11. **Project domain skills are mandatory context.** For Terraform/OpenTofu
-   implementation slices, load the project's `terraform-skill` instructions
-   before writing the spec and require every builder lane to load them before
-   PHASE 0. For AWS provider changes, AWS CLI work, live AWS inspection, IAM,
-   S3, Lambda, Glue, Athena, KMS, or other AWS resources, also require
-   `aws-stuff`. If a required local skill is missing or unreadable, record that
-   in the slice state and treat it as a blocker for risky work.
+   implementation slices, read the project's `terraform-skill/SKILL.md` in
+   full before writing the spec and require every builder lane to load it before
+   PHASE 0. For AWS provider/resource changes, also read `aws-stuff/SKILL.md`.
+   For AWS operational work (AWS SSO/login, AWS CLI, live AWS inspection, or
+   Terraform plans/refreshes that read AWS-backed state or AWS data sources),
+   read `aws-stuff/SKILL.md` before the first AWS command. If a required local
+   skill is missing or unreadable, record that in the slice state and treat it
+   as a blocker for risky work.
 12. **Stop conditions:** failing verification you cannot root-cause,
    instructions conflicting with project docs, irreversible/destructive calls,
    or scope growth beyond the slice -> checkpoint to `.scratch` and ask the
    human.
+13. **The loop ends at a local review branch.** After passing lanes are
+   verified, switch the primary checkout to a fresh dedicated branch from an
+   updated project base, following repo branch naming rules. Apply lane patches
+   there, run all frozen gates, then commit only after every required gate is
+   PASS. Write the final verdict after the commit SHA is final, report branch +
+   commit + checkout path, and stop. Never push, open a PR, or continue
+   follow-up work unless the human asks.
 
 ## Procedure
 
@@ -81,12 +92,16 @@ commands and the builder block template: `dispatch.md` next to this file.
   `.scratch/lessons.md` when present.
 - Inspect `.claude/skills.list` and `.claude/skills/` when present. Record the
   local skill paths that are relevant to the slice.
-- If the slice touches Terraform/OpenTofu, read `terraform-skill/SKILL.md`
-  before planning. Load only the referenced Terraform detail files needed for
-  the diagnosed risk category.
-- If the slice touches AWS providers/resources, AWS CLI, IAM, S3, Lambda, Glue,
-  Athena, KMS, CloudWatch, or live AWS state, read `aws-stuff/SKILL.md` before
-  planning and load the relevant AWS reference file only when needed.
+- Before spec or dispatch, record grounding evidence in `manifest.json`: docs
+  read, absent docs checked, relevant rules found, and local skills discovered.
+- If the slice touches Terraform/OpenTofu, read `terraform-skill/SKILL.md` in
+  full before planning. Load only the referenced Terraform detail files needed
+  for the diagnosed risk category. Record line range read and references loaded.
+- If the slice changes AWS providers/resources, or if the architect will use
+  AWS SSO/login, AWS CLI, live AWS inspection, or Terraform plans/refreshes
+  against AWS-backed state/data sources, read `aws-stuff/SKILL.md` before that
+  work and record whether it was required for implementation, operations, or
+  both.
 - Learn the exact verification gate from docs or CI config.
 - Once per environment: run `codex --version` and require Codex CLI >= 0.133.
   First dispatch in a new environment is a canary before fan-out.
@@ -146,12 +161,14 @@ local PRD/issues. Create:
   dispatch/
   reports/
   runs/
+  verdict.md
 ```
 
 `manifest.json` records at least: slice id, feature slug, base SHA, source
-PRD/issue paths, lane names, allowed file sets, gate commands, required local
-skills and paths, integration branch, and artifact paths. If local PRD/issues
-were explicitly skipped, record `source_prd_path: null`,
+PRD/issue paths, lane names, allowed file sets, gate commands, grounding
+evidence, required local skills and paths, skill read evidence, review branch,
+commit-message rules, and artifact paths. If local PRD/issues were
+explicitly skipped, record `source_prd_path: null`,
 `source_issue_path: null`, and `issue_exception_reason`.
 
 ### 3. Arbitrate
@@ -166,8 +183,12 @@ When judging a completed slice:
 - Verify the frozen gate snapshot:
   `shasum -a 256 -c .scratch/architect-loop/state/<slice>/freeze/gates.sha256`
   and `diff -u freeze/gates.md gates.md`.
-- Run every gate command yourself and compare output against the verbatim frozen
-  gate text -> PASS / FAIL / INVALID.
+- Run every gate command yourself and write a gate ledger entry: frozen command,
+  actual command, cwd/env, output path, exit status, post-run source diff, and
+  result PASS / FAIL / BLOCKED / DEVIATED.
+- A gate is DEVIATED if the actual command/env differs from the frozen gate
+  without an explicit allowed variant. Do not summarize "all gates pass" unless
+  every ledger entry is PASS.
 - Inspect implementation changes with Git from `base_sha`:
   `git diff <base-sha>`, `git diff --name-only <base-sha>`, and
   `git ls-files --others --exclude-standard`.
@@ -191,14 +212,15 @@ Write a self-contained spec to
 - Objective and why.
 - Source PRD/issue paths.
 - Required local skills: exact paths for `terraform-skill` and, when
-  applicable, `aws-stuff`; whether each was read by the architect; and the
-  specific reference files loaded.
+  applicable, `aws-stuff`; why each is required (implementation, operations, or
+  both); full `SKILL.md` read evidence; and the specific reference files loaded.
 - Output format: raw tables, numbers, command output paths, commit SHAs. No
   interpretation.
 - Tool guidance: exact verification commands and APIs/formats/versions to
   verify before coding.
-- Boundaries: allowed files, forbidden files, out-of-scope list, no
-  placeholders, no refactors beyond the task.
+- Boundaries: implementation file allowlist, forbidden implementation files,
+  allowed `.scratch/architect-loop` lane artifact paths, read-only packet
+  artifacts, out-of-scope list, no placeholders, no refactors beyond the task.
 - Mutability limits: gate commands must not update files outside the allowed
   file set. For Terraform/OpenTofu, do not use provider upgrade flags during
   verification. Prefer readonly lock behavior such as
@@ -208,8 +230,27 @@ Write a self-contained spec to
 - Lane plan: 1-4 lanes with non-overlapping file-touch sets. Any overlap means
   those lanes run as one.
 - Gates: exact commands and thresholds.
+- Gate fidelity: for each gate, record cwd/env, allowed variants, mutation
+  policy, and whether source files such as lockfiles may change. For
+  Terraform/OpenTofu, do not freeze commands that run provider upgrades unless
+  the lockfile is an allowed output; if the project Makefile upgrades providers,
+  either freeze a non-upgrading local equivalent or treat the Makefile/CI run as
+  a separate gate.
+- Terraform plan gates must use the committed lockfile/provider versions. After
+  each plan, check source diffs; provider-version or lockfile drift invalidates
+  the gate unless explicitly allowed. If a state lock blocks a plan, ask or mark
+  BLOCKED unless `-lock=false` was frozen as a read-only allowed variant. If a
+  plan includes unrelated changes, run the same gate on `base_sha` and judge
+  only the candidate delta; without a baseline comparison, the scope gate cannot
+  PASS.
 - Effort call: default `xhigh`; use `high` only for routine, tightly specified
   lanes and record why.
+- Git finalization: base branch/update command, review branch name pattern,
+  commit-message rules from repo docs, and the exact stop point after local
+  commit. Default branch prefix is `tdiaconescu/` only when repo docs do not
+  specify a stricter rule. Final review branches are created in the primary
+  checkout, not a hidden review worktree, unless the human explicitly asks for a
+  separate worktree.
 
 If required local skills live outside the worktree through symlinks or might be
 blocked by the builder sandbox, copy task-sized skill excerpts into the packet
@@ -220,7 +261,7 @@ Freeze gates before dispatch:
 
 ```bash
 mkdir -p .scratch/architect-loop/state/<slice>/freeze
-cp .scratch/architect-loop/state/<slice>/gates.md \
+command cp .scratch/architect-loop/state/<slice>/gates.md \
   .scratch/architect-loop/state/<slice>/freeze/gates.md
 (cd .scratch/architect-loop/state/<slice>/freeze && \
   shasum -a 256 gates.md > gates.sha256)
@@ -237,39 +278,60 @@ Do not block on long runs. Whenever you return to a running lane, check whether
 the lane JSON output file is growing. If it is silent 15+ minutes on one
 in-flight command, follow stall rescue in `dispatch.md`.
 
-### 8. Post-Flight And Integrate
+### 8. Post-Flight And Finalize Review Branch
 
 Per lane:
 
 - Ingest the lane report from the lane worktree into
   `.scratch/architect-loop/state/<slice>/reports/`.
+- Ingest the lane JSONL event stream into
+  `.scratch/architect-loop/state/<slice>/runs/` and validate that it parses; a
+  missing, empty, or invalid JSONL run log makes the lane incomplete.
 - Confirm PHASE 0 disagreements were raised or explicitly justified.
 - Confirm the lane report lists required local skills used and extra context
-  loaded. A Terraform/OpenTofu lane that did not load `terraform-skill`, or an
-  AWS lane that did not load required `aws-stuff`, is incomplete unless the
-  missing file was explicitly unavailable and the architect accepted that risk.
+  loaded. A Terraform/OpenTofu lane that did not load `terraform-skill`, or a
+  lane required to use `aws-stuff` for AWS implementation or operational work,
+  is incomplete unless the missing file was explicitly unavailable and the
+  architect accepted that risk.
 - Verify the gate snapshot in the main checkout still matches.
 - Check `git status --porcelain --untracked-files=all` in the worktree.
-- Check changed and untracked source files are only inside the lane's allowed
-  file set.
+- Check changed and untracked implementation files are only inside the lane's
+  allowed file set. Ignored lane reports and run logs under
+  `.scratch/architect-loop/` are artifacts, not implementation files.
 - Inspect the implementation patch from `base_sha`, including new files.
 
-Then integrate passing lanes:
+Then finalize exactly one local review branch:
 
-- Stage only declared implementation files: never run `git add -A`.
-- Check `git diff --cached --name-only` before committing.
-- Commit passing lane changes locally on the lane branch.
-- Merge passing lanes sequentially into `tdiaconescu/slice/<name>` or the
-  project-approved branch name.
-- Run gate commands after each merge as an integration smoke check.
-- After every gate run and before any final verdict, check `git status --short`
-  and fail or ask if verification changed files outside the declared
-  implementation file set.
-- Remove worktrees when finished.
+- Create a fresh dedicated branch from an updated project base, following the
+  repo's Git instructions. Use `tdiaconescu/<feature-slug>` only as the default
+  when no stricter project pattern exists. Do not reuse or force-reset an
+  existing branch unless the human explicitly asks.
+- Create the review branch in the primary checkout so the human lands on the
+  branch they should evaluate. If the primary checkout has tracked or untracked
+  implementation changes, stop and ask; do not silently create a hidden review
+  worktree or leave the human on the base branch.
+- Apply passing lane patches to the review branch. Stage only declared
+  implementation files; never run `git add -A`.
+- Run every frozen gate on the review branch before committing. If any gate is
+  FAIL / BLOCKED / DEVIATED, or post-gate cleanliness checks show unstaged
+  mutations, new untracked implementation files, or staged-patch drift, stop
+  without committing and report the blocker.
+- Check `git diff --cached --name-only` and `git diff --cached` before
+  committing.
+- Commit once after all required gates are PASS. Build the commit message from
+  repo rules; never include AI co-author trailers, generated-by footers, or tool
+  branding unless the repo explicitly requires them.
+- Write `.scratch/architect-loop/state/<slice>/verdict.md` only after the final
+  commit or amend. It must include review branch, updated base SHA, final commit
+  SHA, checkout path, gate ledger, and changed implementation files. If any
+  commit/amend happens after the verdict, the verdict is stale and must be
+  regenerated.
+- Stop after reporting the local branch, commit SHA, and checkout path. Do not
+  push, open a PR, squash, amend, or continue follow-up work unless the human
+  asks.
 
 Generated `.scratch` artifacts must not be staged, committed, pushed, or appear
-in a PR. Before pushing, squash local lane/integration commits if the human
-wants one final commit.
+in a PR.
 
 ## Maintenance
 

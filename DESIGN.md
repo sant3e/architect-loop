@@ -54,6 +54,9 @@ their repository history or PRs.
   dispatch/<lane>.prompt.md
   reports/<lane>.md
   runs/<lane>.jsonl
+  runs/<lane>.stderr.log
+  runs/<lane>.last.md
+  verdict.md
 
 .scratch/architect-loop/worktrees/<slice>-<lane>/
 .scratch/architect-loop/research/<topic>/
@@ -75,16 +78,24 @@ These are intentionally separate. A checksum answers whether the gate artifact
 changed. It does not show implementation changes and must never be used as a
 replacement for source diff review.
 
-## Integration Policy
+## Review Branch Policy
 
-Builders cannot commit. The architect may create local lane and integration
-commits, but only after:
+Builders cannot commit. The architect creates one local review branch commit,
+but only after:
 
 - the frozen gate snapshot still matches,
 - changed and untracked files are inside the lane's declared file set,
 - the implementation diff has been read,
-- gate commands have been run by the architect,
+- all frozen gate commands have been run by the architect on the review branch,
 - only declared implementation files are staged.
 
-Before pushing, local lane/integration commits may be squashed into a single
-clean commit. `.scratch` artifacts remain ignored either way.
+The review branch is created in the primary checkout from an updated project
+base and follows repo Git instructions for branch names and commit messages. If
+the primary checkout has user work, the loop stops and asks instead of hiding
+the result in another worktree. The verdict is written after the final commit
+SHA exists; amending or replacing that commit makes the verdict stale and
+requires regeneration.
+
+The loop stops after reporting the local review branch and commit. Pushing,
+opening a PR, squashing, amending, or continuing follow-up work requires an
+explicit human request. `.scratch` artifacts remain ignored either way.

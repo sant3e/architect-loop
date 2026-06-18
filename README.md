@@ -17,8 +17,10 @@ worktrees.
 - Frozen gate integrity uses local snapshots and SHA-256 checks, not committed
   `docs/gates/` files.
 - Single-lane and multi-lane work both run in ignored git worktrees.
-- Lane integration stages only declared implementation files; `git add -A` is
-  forbidden.
+- Review branch finalization stages only declared implementation files;
+  `git add -A` is forbidden.
+- The loop stops at a local review branch commit in the primary checkout. It
+  does not push or open a PR unless the human explicitly asks.
 - The design phase incorporates a `/grill-with-docs` style interrogation before
   local PRD and issue-slice artifacts are produced.
 - No external issue tracker is used unless the human explicitly asks.
@@ -38,8 +40,9 @@ worktrees.
 4. Select one issue as the current slice.
 5. Freeze gates under `.scratch/architect-loop/state/<slice>/`.
 6. Dispatch one Codex builder per lane in ignored worktrees.
-7. Verify frozen gates, run gates, inspect Git diffs, and integrate passing
-   implementation changes.
+7. Verify frozen gates, run gates, inspect Git diffs, and commit passing
+   implementation changes to a fresh local review branch in the primary
+   checkout.
 
 `/architect-research` runs discovery-scale research:
 
@@ -79,11 +82,15 @@ Typical project artifacts:
 .scratch/architect-loop/state/<slice>/dispatch/<lane>.prompt.md
 .scratch/architect-loop/state/<slice>/reports/<lane>.md
 .scratch/architect-loop/state/<slice>/runs/<lane>.jsonl
+.scratch/architect-loop/state/<slice>/runs/<lane>.stderr.log
+.scratch/architect-loop/state/<slice>/runs/<lane>.last.md
+.scratch/architect-loop/state/<slice>/verdict.md
 .scratch/architect-loop/worktrees/<slice>-<lane>/
 .scratch/architect-loop/research/<topic>/
 ```
 
-The final PR should contain implementation changes only, not loop artifacts.
+The local review branch should contain implementation changes only, not loop
+artifacts. Pushing or opening a PR is a separate human-approved step.
 
 ## Validation
 

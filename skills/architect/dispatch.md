@@ -11,8 +11,8 @@ new environment, launch one canary lane before fanning out.
 ## Storage Contract
 
 All loop artifacts live under `.scratch/architect-loop/` and are expected to be
-ignored by Git. Git is still used for implementation diffs and local lane
-commits.
+ignored by Git. Git is still used for implementation diffs and the local review
+branch commit.
 
 Implementation slices are selected from local planning artifacts under
 `.scratch/<feature-slug>/`: a `PRD.md` plus at least one
@@ -32,15 +32,20 @@ Per slice:
   dispatch/<lane>.prompt.md
   reports/<lane>.md
   runs/<lane>.jsonl
+  runs/<lane>.stderr.log
+  runs/<lane>.last.md
+  verdict.md
 
 .scratch/architect-loop/worktrees/<slice>-<lane>/
 ```
 
 The authoritative slice state stays in the main checkout. Each lane worktree
 gets a copy of the slice packet under its own `.scratch/architect-loop/packet/`
-and writes its raw report/run log under its own `.scratch/architect-loop/`.
+and writes its raw report, Codex JSONL event stream, stderr log, and last
+message under its own `.scratch/architect-loop/`.
 After the run, the architect ingests that report back into the main checkout's
-`.scratch/architect-loop/state/<slice>/reports/`.
+`.scratch/architect-loop/state/<slice>/reports/` and ingests the run artifacts
+back into `.scratch/architect-loop/state/<slice>/runs/`.
 
 ## Gate Freeze
 
@@ -49,7 +54,7 @@ Freeze before dispatch:
 ```bash
 STATE=.scratch/architect-loop/state/<slice>
 mkdir -p "$STATE/freeze"
-cp "$STATE/gates.md" "$STATE/freeze/gates.md"
+command cp "$STATE/gates.md" "$STATE/freeze/gates.md"
 (cd "$STATE/freeze" && shasum -a 256 gates.md > gates.sha256)
 ```
 
@@ -79,22 +84,29 @@ LANE=<NN>
 BASE=<base-sha>
 STATE="$REPO/.scratch/architect-loop/state/$SLICE"
 WT="$REPO/.scratch/architect-loop/worktrees/$SLICE-$LANE"
+RUN_JSONL="$WT/.scratch/architect-loop/runs/$SLICE-$LANE.jsonl"
+STDERR_LOG="$WT/.scratch/architect-loop/runs/$SLICE-$LANE.stderr.log"
+LAST_MSG="$WT/.scratch/architect-loop/runs/$SLICE-$LANE.last.md"
 
 git -C "$REPO" worktree add "$WT" -b "tdiaconescu/lane/$SLICE-$LANE" "$BASE"
 
 mkdir -p "$WT/.scratch/architect-loop/packet/$SLICE"
-cp "$STATE/spec.md" "$WT/.scratch/architect-loop/packet/$SLICE/spec.md"
-cp "$STATE/gates.md" "$WT/.scratch/architect-loop/packet/$SLICE/gates.md"
-cp "$STATE/freeze/gates.md" "$WT/.scratch/architect-loop/packet/$SLICE/frozen-gates.md"
-cp "$STATE/manifest.json" "$WT/.scratch/architect-loop/packet/$SLICE/manifest.json"
+command cp "$STATE/spec.md" "$WT/.scratch/architect-loop/packet/$SLICE/spec.md"
+command cp "$STATE/gates.md" "$WT/.scratch/architect-loop/packet/$SLICE/gates.md"
+command cp "$STATE/freeze/gates.md" "$WT/.scratch/architect-loop/packet/$SLICE/frozen-gates.md"
+command cp "$STATE/manifest.json" "$WT/.scratch/architect-loop/packet/$SLICE/manifest.json"
 
 mkdir -p "$WT/.scratch/architect-loop/reports" "$WT/.scratch/architect-loop/runs"
 
 codex exec -C "$WT" --sandbox workspace-write \
   -m gpt-5.5 -c model_reasoning_effort="xhigh" \
-  --json -o ".scratch/architect-loop/runs/$SLICE-$LANE.jsonl" \
-  - < "$STATE/dispatch/$LANE.prompt.md"
+  --json -o "$LAST_MSG" \
+  - < "$STATE/dispatch/$LANE.prompt.md" > "$RUN_JSONL" 2> "$STDERR_LOG"
 ```
+
+`--json` is the event stream and must be captured from stdout. `-o` is only the
+last assistant message; do not name it `.jsonl`. Keep stderr separate so shell
+warnings and tool errors cannot corrupt the JSONL event stream.
 
 If required local skill files are linked outside the worktree or may be blocked
 by the builder sandbox, copy task-sized excerpts into
@@ -106,7 +118,8 @@ Most slices should remain one lane.
 
 A worktree's `.git` is a pointer file and the resolved git dir is sandbox
 protected. Builders cannot commit or touch shared history; the architect stages
-and commits only after post-flight checks pass.
+and commits only on the final review branch after post-flight and frozen gates
+pass.
 
 ## Post-Flight Checks
 
@@ -121,8 +134,13 @@ STATE="$REPO/.scratch/architect-loop/state/$SLICE"
 WT="$REPO/.scratch/architect-loop/worktrees/$SLICE-$LANE"
 
 mkdir -p "$STATE/reports" "$STATE/runs"
-cp "$WT/.scratch/architect-loop/reports/$SLICE-$LANE.md" "$STATE/reports/$LANE.md"
-cp "$WT/.scratch/architect-loop/runs/$SLICE-$LANE.jsonl" "$STATE/runs/$LANE.jsonl"
+command cp "$WT/.scratch/architect-loop/reports/$SLICE-$LANE.md" "$STATE/reports/$LANE.md"
+command cp "$WT/.scratch/architect-loop/runs/$SLICE-$LANE.jsonl" "$STATE/runs/$LANE.jsonl"
+command cp "$WT/.scratch/architect-loop/runs/$SLICE-$LANE.stderr.log" "$STATE/runs/$LANE.stderr.log"
+command cp "$WT/.scratch/architect-loop/runs/$SLICE-$LANE.last.md" "$STATE/runs/$LANE.last.md"
+test -s "$STATE/runs/$LANE.jsonl"
+python3 -c 'import json,sys; lines=[l for l in open(sys.argv[1]) if l.strip()]; [json.loads(l) for l in lines]; assert lines' \
+  "$STATE/runs/$LANE.jsonl"
 
 (cd "$STATE/freeze" && shasum -a 256 -c gates.sha256)
 diff -u "$STATE/freeze/gates.md" "$STATE/gates.md"
@@ -137,50 +155,113 @@ Fail the lane if any changed or untracked implementation file is outside the
 lane's declared allowed file set. Ignored `.scratch` files are lane artifacts
 and must not be staged.
 
+Fail or re-run the lane if the JSONL event stream is missing, empty, or invalid.
+The last message file is useful for summaries, but it is not a substitute for
+the JSONL run log.
+
 Fail or return the lane for clarification if its report does not list the
 required local skills it loaded. Terraform/OpenTofu lanes must load
-`terraform-skill`; lanes that touch AWS providers/resources, AWS CLI, IAM, S3,
-Lambda, Glue, Athena, KMS, CloudWatch, or live AWS state must also load
-`aws-stuff`.
+`terraform-skill`. Lanes that change AWS providers/resources must load
+`aws-stuff`; lanes that run AWS SSO/login, AWS CLI, live AWS inspection, or
+Terraform plans/refreshes against AWS-backed state/data sources must also load
+`aws-stuff` for operational context.
 
-Gate commands must not rewrite lock files, generated config, or unrelated
+Gate commands must match the frozen command or an explicitly frozen allowed
+variant. Record actual command, cwd/env, exit status, output path, post-run
+source diff, and PASS / FAIL / BLOCKED / DEVIATED for each gate. Do not call a
+gate PASS if a subcommand was skipped, an env var changed, `-lock=false` was
+added ad hoc, or the command rewrote lock files, generated config, or unrelated
 source files. If a Terraform/OpenTofu init or validate step wants to update
 `.terraform.lock.hcl`, rerun with readonly lock behavior when supported, such as
 `terraform init -backend=false -lockfile=readonly`. If the gate cannot run
 without changing out-of-scope files, stop and record the blocker instead of
 including the mutation in the lane.
 
-For new allowed files, inspect them explicitly and then stage declared files
-only:
+For new allowed files, inspect them explicitly and use intent-to-add only when
+needed to make the lane patch complete. Do not commit in lane worktrees:
 
 ```bash
-git -C "$WT" add -- <allowed-files...>
-git -C "$WT" diff --cached --name-only
-git -C "$WT" diff --cached
-git -C "$WT" commit -m "lane <NN>: <what>"
+# only if the lane created new allowed files:
+git -C "$WT" add -N -- <new-allowed-files...>
+git -C "$WT" diff --binary "$BASE" -- <allowed-files...>
 ```
 
 Never run `git add -A`. Never stage `.scratch`, `.architect`, `docs/gates`,
 `docs/lanes`, generated PRDs, lane reports, run logs, or other loop artifacts.
 
-## Integration
+## Review Branch Finalization
 
 ```bash
-git -C "$REPO" checkout -b "tdiaconescu/slice/$SLICE" "$BASE"
+REPO=<repo-root>
+SLICE=<slice>
+BASE=<slice-base-sha>
+STATE="$REPO/.scratch/architect-loop/state/$SLICE"
+BASE_BRANCH=<project-base-branch>
+REVIEW_BRANCH=<project-rule-compliant-feature-branch>
+
+git -C "$REPO" fetch --prune origin "$BASE_BRANCH"
+UPDATED_BASE="$(git -C "$REPO" rev-parse "origin/$BASE_BRANCH")"
+git -C "$REPO" status --short --untracked-files=all
+git -C "$REPO" diff --quiet
+git -C "$REPO" diff --cached --quiet
+test -z "$(git -C "$REPO" ls-files --others --exclude-standard)"
+git -C "$REPO" switch -c "$REVIEW_BRANCH" "$UPDATED_BASE"
+
+mkdir -p "$STATE/patches"
+
 # per passing lane, sequentially:
-git -C "$REPO" merge --no-ff "tdiaconescu/lane/$SLICE-$LANE"
-<run the gate commands>
+LANE=<NN>
+WT="$REPO/.scratch/architect-loop/worktrees/$SLICE-$LANE"
+# only if the lane created new allowed files:
+git -C "$WT" add -N -- <new-allowed-files...>
+git -C "$WT" diff --binary "$BASE" -- <allowed-files...> > "$STATE/patches/$LANE.patch"
+git -C "$REPO" apply --check "$STATE/patches/$LANE.patch"
+git -C "$REPO" apply --index "$STATE/patches/$LANE.patch"
+
+git -C "$REPO" diff --cached --name-only
+git -C "$REPO" diff --cached
+git -C "$REPO" diff --cached --binary > "$STATE/final-candidate.pre-gates.patch"
+<run every frozen gate command in "$REPO">
+git -C "$REPO" status --short --untracked-files=all
+git -C "$REPO" diff --quiet
+test -z "$(git -C "$REPO" ls-files --others --exclude-standard)"
+git -C "$REPO" diff --cached --binary > "$STATE/final-candidate.post-gates.patch"
+diff -u "$STATE/final-candidate.pre-gates.patch" "$STATE/final-candidate.post-gates.patch"
+test -s "$STATE/commit-message.txt"
+! grep -Ei '^(Co-Authored-By:|Generated[- ]with|Generated[- ]by)' "$STATE/commit-message.txt"
+git -C "$REPO" commit -F "$STATE/commit-message.txt"
+git -C "$REPO" rev-parse HEAD
 
 # cleanup:
 git -C "$REPO" worktree remove "$WT"
-git -C "$REPO" branch -d "tdiaconescu/lane/$SLICE-$LANE"
 ```
 
-A merge conflict means the lane plan was not disjoint. Kill the conflicting
-lane and re-spec; do not hand-resolve builder conflicts.
+Choose `REVIEW_BRANCH` from repo Git instructions; default to
+`tdiaconescu/<feature-slug>` only when the repo has no stricter rule. If that
+branch already exists, create a brand new suffixed branch or ask; never
+force-reset it without explicit human approval.
 
-Before pushing or opening a PR, the human may squash local lane/integration
-commits into one commit. Loop artifacts remain ignored either way.
+The final review branch belongs in the primary checkout so the human is left on
+the branch to evaluate. Before `git switch -c`, inspect the status output. If
+the primary checkout contains tracked changes or untracked implementation files,
+stop and ask instead of stashing, overwriting, or creating a hidden review
+worktree. Ignored `.scratch` loop artifacts are expected.
+
+If patch apply, final gates, post-gate cleanliness checks, or staged-patch
+comparison fail, stop without committing and report the blocker. If the base
+update fails, stop and ask instead of using a stale base. Do not hand-resolve
+builder conflicts.
+
+Create `$STATE/commit-message.txt` from the repo's commit rules and inspect it
+before committing. Do not include AI co-author trailers, generated-by footers,
+or tool branding unless the repo explicitly requires them.
+
+After the commit, write `$STATE/verdict.md` with review branch, updated base
+SHA, final commit SHA, checkout path, gate ledger, and changed implementation
+files. If the commit is amended or replaced after that, regenerate
+`verdict.md`; otherwise it is stale. Stop after reporting the local branch,
+commit SHA, and primary checkout path. Do not push, open a PR, squash, amend,
+or continue follow-up work unless the human asks.
 
 ## Stall Detection And Rescue
 
@@ -214,11 +295,12 @@ REQUIRED LOCAL SKILLS - Before PHASE 0:
 Read every skill file listed in the REQUIRED LOCAL SKILLS section below. If the
 slice is Terraform/OpenTofu and `terraform-skill` is available, you must read it
 and apply its response contract, risk categories, validation rules, and rollback
-expectations. If the slice touches AWS providers/resources, AWS CLI, IAM, S3,
-Lambda, Glue, Athena, KMS, CloudWatch, or live AWS state and `aws-stuff` is
-available, you must read it and apply its credential, profile, query filtering,
-preview, and destructive-operation rules. If a required skill path is missing or
-unreadable, state that in PHASE 0 and mark the lane
+expectations. If the lane changes AWS providers/resources or runs AWS
+SSO/login, AWS CLI, live AWS inspection, or Terraform plans/refreshes against
+AWS-backed state/data sources and `aws-stuff` is available, you must read it and
+apply its credential, profile, query filtering, preview, and
+destructive-operation rules. If a required skill path is missing or unreadable,
+state that in PHASE 0 and mark the lane
 COMPLETE_WITH_CONCERNS or BLOCKED depending on risk.
 
 PHASE 0 - Before any code: reply with your plan and EVERY disagreement you have
@@ -228,24 +310,29 @@ disagreements, state what you checked before concluding the spec is sound.
 Verify the named APIs/formats/versions against the live dependencies before
 planning around them.
 
-PHASE 1 - Treat shared contracts listed in the spec as frozen. The acceptance
-gates in .scratch/architect-loop/packet/<slice>/frozen-gates.md are read-only
-for you; editing gate artifacts or regenerating criteria fails the lane.
+PHASE 1 - Treat shared contracts listed in the spec as frozen. The slice packet
+and frozen gates under .scratch/architect-loop/packet/<slice>/ are read-only
+for you; editing packet artifacts or regenerating criteria fails the lane.
 
-PHASE 2 - Build YOUR LANE ONLY: exactly the files listed in BOUNDARIES. You
-are one of several parallel lane agents working in isolated worktrees; files
-outside your lane belong to other agents. Touching them fails your lane.
-No placeholder implementations. Search the codebase before implementing.
-Full implementations only.
+PHASE 2 - Build YOUR LANE ONLY. Implementation changes may touch only the
+implementation files listed in BOUNDARIES. Required loop artifacts are outside
+that implementation boundary: write the lane report under
+.scratch/architect-loop/reports/, and the dispatch wrapper writes run logs
+under .scratch/architect-loop/runs/. Keep all .scratch artifacts ignored and
+untracked. Files outside your lane belong to other agents; touching them fails
+your lane. No placeholder implementations. Search the codebase before
+implementing. Full implementations only.
 
 Verify your work by running the lane's gate commands and record verbatim
-output. Do NOT commit. Do NOT delete or update lock files. If Terraform/OpenTofu
-or another tool wants to rewrite a lock file outside your declared boundary,
-record the exact command and failure/blocker instead of accepting the change. Do
-NOT escalate privileges if a git command fails; record the exact error and
-continue. Give every potentially long command an explicit timeout. If a runtime
-will not start under the sandbox, record the exact failure in your lane report
-and route around it; never busy-wait or retry in a loop.
+output plus a gate ledger: frozen command, actual command, cwd/env, exit status,
+output path, post-run source diff, and PASS / FAIL / BLOCKED / DEVIATED. Do NOT
+commit. Do NOT delete or update lock files. If Terraform/OpenTofu or another
+tool wants to rewrite a lock file outside your declared boundary, record the
+exact command and failure/blocker instead of accepting the change. Do NOT
+escalate privileges if a git command fails; record the exact error and continue.
+Give every potentially long command an explicit timeout. If a runtime will not
+start under the sandbox, record the exact failure in your lane report and route
+around it; never busy-wait or retry in a loop.
 
 When done, write your lane report to:
 .scratch/architect-loop/reports/<slice>-<lane>.md
@@ -273,7 +360,7 @@ handled end-to-end; do not stop at analysis or partial fixes.
 === REQUIRED LOCAL SKILLS ===
 ...
 
-=== BOUNDARIES (may touch / must not touch / out of scope) ===
+=== BOUNDARIES (implementation allowlist / forbidden implementation files / allowed artifacts / out of scope) ===
 ...
 
 === DISAGREEMENT RULINGS (from last session) ===
